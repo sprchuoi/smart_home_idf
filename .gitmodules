@@ -1,0 +1,6 @@
+[submodule "smart_home_zephyr"]
+	path = smart_home_zephyr
+	url = https://github.com/sprchuoi/smart_home_zephyr.git
+[submodule "open_wake_work"]
+	path = open_wake_work
+	url = https://github.com/sprchuoi/openWakeWord.git
