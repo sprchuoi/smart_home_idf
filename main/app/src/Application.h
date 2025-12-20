@@ -7,20 +7,22 @@
 
 #pragma once
 
-#include "core/EventBus.h"
-#include "core/AppStateMachine.h"
-#include "core/AudioStateMachine.h"
-#include "core/PowerManager.h"
-#include "core/WatchdogSupervisor.h"
-#include "services/WifiService.h"
-#include "services/WifiConfigService.h"
-#include "services/MqttService.h"
-#include "services/WakeWordService.h"
-#include "services/AudioPipeline.h"
-#include "services/OTAService.h"
-#include "drivers/OledDisplay.h"
-#include "drivers/UartDriver.h"
+
+#include "core/eventbus/EventBus.h"
+#include "core/statemachine/AppStateMachine.h"
+#include "core/audio/AudioStateMachine.h"
+#include "core/powermanager/PowerManager.h"
+#include "core/watchdog/WatchdogSupervisor.h"
+#include "services/wifi/WifiService.h"
+#include "services/wifi/WifiConfigService.h"
+#include "services/mqtt/MqttService.h"
+#include "services/wakeup/WakeWordService.h"
+#include "services/audio/AudioPipeline.h"
+#include "services/ota/OTAService.h"
+#include "drivers/oled/OledDisplay.h"
+#include "drivers/uart/UartDriver.h"
 #include "error/ErrorHandler.h"
+
 
 /**
  * @brief Main Application class
@@ -55,6 +57,7 @@ public:
     void stop();
 
 private:
+
     void setupEventSubscriptions();
     void handleStateChange(const EventMessage& event);
     void handleWakeWord(const EventMessage& event);

@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "core/EventBus.h"
+#include "core/eventbus/EventBus.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"

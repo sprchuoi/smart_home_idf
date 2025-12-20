@@ -22,15 +22,15 @@ WatchdogSupervisor::~WatchdogSupervisor() {
     stop();
 }
 
-bool WatchdogSupervisor::initialize(uint32_t timeout_seconds) {
+bool WatchdogSupervisor::initialize(const esp_task_wdt_config_t wdt_config) {
     if (m_initialized) {
         return true;
     }
     
-    m_timeout_seconds = timeout_seconds;
+    m_timeout_seconds = wdt_config.timeout_ms / 1000; // set timeout from config (convert ms to seconds)
     
     // Initialize ESP task watchdog
-    esp_err_t err = esp_task_wdt_init(timeout_seconds, true);
+    esp_err_t err = esp_task_wdt_init(&wdt_config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize task watchdog: %s", esp_err_to_name(err));
         return false;
@@ -63,7 +63,7 @@ bool WatchdogSupervisor::initialize(uint32_t timeout_seconds) {
     
     m_initialized = true;
     ESP_LOGI(TAG, "WatchdogSupervisor initialized (timeout: %lu s, Core %d)",
-            timeout_seconds, TASK_CORE);
+            m_timeout_seconds, TASK_CORE);
     return true;
 }
 
@@ -231,7 +231,8 @@ void WatchdogSupervisor::triggerSafeReset(const char* reason) {
     event.source = EventSource::ERROR_HANDLER;
     event.destination = EventSource::APPLICATION;
     event.payload.error_info.error_code = ESP_ERR_TIMEOUT;
-    event.payload.error_info.error_msg = reason;
+    strncpy(event.payload.error_info.error_msg, reason, sizeof(event.payload.error_info.error_msg) - 1);
+    event.payload.error_info.error_msg[sizeof(event.payload.error_info.error_msg) - 1] = '\0';
     
     EventBus::getInstance().publish(event);
     

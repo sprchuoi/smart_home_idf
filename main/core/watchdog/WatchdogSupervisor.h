@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "core/EventBus.h"
+#include "core/eventbus/EventBus.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -42,7 +42,7 @@ public:
      * @param timeout_seconds Watchdog timeout in seconds
      * @return true on success
      */
-    bool initialize(uint32_t timeout_seconds = 30);
+    bool initialize(const esp_task_wdt_config_t wdt_config = {});
     
     /**
      * @brief Register a task for monitoring

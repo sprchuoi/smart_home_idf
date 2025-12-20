@@ -196,6 +196,11 @@ void OledDisplay::stop() {
     m_initialized = false;
 }
 
+void OledDisplay::taskEntry(void* parameter) {
+    OledDisplay* instance = static_cast<OledDisplay*>(parameter);
+    instance->taskLoop();
+}
+
 void OledDisplay::taskLoop() {
     ESP_LOGI(TAG, "OLED display task started on Core %d", xPortGetCoreID());
     

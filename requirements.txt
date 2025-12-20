@@ -10,6 +10,9 @@ myst-parser>=0.18.0
 breathe>=4.35.0
 doxygen>=1.9.0
 
+# MyST dependencies
+linkify-it-py>=2.0.0
+
 # Testing (optional)
 pytest>=7.0.0
 pytest-cov>=4.0.0

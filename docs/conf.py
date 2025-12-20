@@ -39,12 +39,12 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
-html_logo = '_static/logo.png'
-html_favicon = '_static/favicon.ico'
+# html_logo = '_static/logo.png'
+# html_favicon = '_static/favicon.ico'
 
 # Theme options
 html_theme_options = {
-    'logo_only': False,
+    'logo_only': False, 
     'display_version': True,
     'prev_next_buttons_location': 'bottom',
     'style_external_links': False,
@@ -81,9 +81,10 @@ breathe_default_project = "smart_home"
 
 # Intersphinx mapping
 intersphinx_mapping = {
-    'python': ('https://docs.python.org/3', None),
-    'esp-idf': ('https://docs.espressif.com/projects/esp-idf/en/latest/', None),
+    "python": ("https://docs.python.org/3", None),
+    "esp-idf": ("https://docs.espressif.com/projects/esp-idf/en/latest/esp32/", None),
 }
+
 
 # Todo extension
 todo_include_todos = True

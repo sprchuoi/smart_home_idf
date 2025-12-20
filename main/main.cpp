@@ -13,7 +13,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
-#include "app/Application.h"
+#include "app/src/Application.h"
 
 static const char* TAG = "main";
 

@@ -107,16 +107,15 @@ void OTAService::taskLoop() {
     while (true) {
         if (m_ota_in_progress) {
             // Perform OTA update
-            esp_https_ota_config_t ota_config = {
-                .http_config = {
-                    .url = m_ota_url.c_str(),
-                    .timeout_ms = 5000,
-                },
-                .partial_http_download = false,
-            };
+            esp_http_client_config_t http_config = {};
+            http_config.url = m_ota_url.c_str();
+            http_config.timeout_ms = 5000;
+
+            esp_https_ota_config_t ota_config = {};
+            ota_config.http_config = &http_config;
             
             esp_https_ota_handle_t https_ota_handle = nullptr;
-            esp_err_t err = esp_https_ota(&ota_config, &https_ota_handle);
+            esp_err_t err = esp_https_ota(&ota_config);
             
             if (err == ESP_OK) {
                 esp_app_desc_t app_desc;

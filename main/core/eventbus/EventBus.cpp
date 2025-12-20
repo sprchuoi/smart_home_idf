@@ -33,6 +33,8 @@ bool EventBus::initialize(size_t queue_size) {
     return true;
 }
 
+
+
 bool EventBus::publish(const EventMessage& event) {
     if (m_queue == nullptr) {
         ESP_LOGE(TAG, "EventBus not initialized");
@@ -81,16 +83,18 @@ void EventBus::processEvents() {
         if (xSemaphoreTake(m_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             for (const auto& sub : m_subscriptions) {
                 if (sub.type == event.type || sub.type == EventType::SYSTEM_ERROR) {
-                    try {
-                        sub.callback(event);
-                    } catch (...) {
-                        ESP_LOGE(TAG, "Exception in event callback");
-                    }
+                    ESP_LOGE(TAG, "Exception in event callback");
+                    sub.callback(event);
                 }
             }
             xSemaphoreGive(m_mutex);
         }
     }
+}
+
+bool EventBus::reset(){
+    xQueueReset(m_queue);
+    return true;
 }
 
 void EventBus::deinitialize() {
@@ -107,4 +111,5 @@ void EventBus::deinitialize() {
     m_subscriptions.clear();
     ESP_LOGI(TAG, "EventBus deinitialized");
 }
+
 

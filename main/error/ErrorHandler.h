@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "core/EventBus.h"
+#include "core/eventbus/EventBus.h"
 #include <string>
 
 /**
@@ -38,12 +38,10 @@ public:
      * @param error_code Error code
      * @param error_msg Error message
      */
-    void reportError(ErrorCategory category, int error_code, const char* error_msg);
-    
-    /**
-     * @brief Report an error with formatted message
-     */
-    void reportError(ErrorCategory category, int error_code, const char* format, ...);
+    void reportError(ErrorCategory category,
+                        int error_code,
+                        const char* format,
+                        ...);
 
 private:
     ErrorHandler() = default;

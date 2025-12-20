@@ -8,8 +8,8 @@
 
 #pragma once
 
-#include "core/EventBus.h"
-#include "services/AudioPipeline.h"
+#include "core/eventbus/EventBus.h"
+#include "services/audio/AudioPipeline.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <cstdint>

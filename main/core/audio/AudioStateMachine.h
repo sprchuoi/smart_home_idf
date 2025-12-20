@@ -8,10 +8,12 @@
 
 #pragma once
 
-#include "core/EventBus.h"
+
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string>
+#include "core/eventbus/EventBus.h"
 
 /**
  * @brief Audio states

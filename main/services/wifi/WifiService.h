@@ -8,8 +8,8 @@
 
 #pragma once
 
-#include "core/EventBus.h"
-#include "services/WifiConfigService.h"
+#include "core/eventbus/EventBus.h"
+#include "services/wifi/WifiConfigService.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -62,10 +62,18 @@ public:
      */
     void stop();
     
+    
+    /**
+     * @brief Get task handle (for wifi)
+     */
+    TaskHandle_t getTaskHandle() const { return m_task_handle; }
+
+
     /**
      * @brief FreeRTOS task entry point
      */
     static void taskEntry(void* parameter);
+
 
 private:
     void taskLoop();

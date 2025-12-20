@@ -91,6 +91,11 @@ void AppStateMachine::stop() {
     m_initialized = false;
 }
 
+void AppStateMachine::taskEntry(void* parameter) {
+    AppStateMachine* instance = static_cast<AppStateMachine*>(parameter);
+    instance->taskLoop();
+}
+
 std::string AppStateMachine::getStateString() const {
     switch (m_current_state) {
         case AppState::INIT: return "INIT";

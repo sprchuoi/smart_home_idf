@@ -3,10 +3,12 @@
  * @brief Main Application implementation
  */
 
-#include "Application.h"
+#include "cfg/Application_cfg.hpp"
+
 #include <string>
 #include <cstring>
 #include "nvs_flash.h"
+
 
 const char* Application::TAG = "Application";
 
@@ -78,7 +80,7 @@ bool Application::initialize() {
     }
     
     // Initialize Watchdog Supervisor
-    if (!m_watchdog.initialize(30)) {  // 30 second timeout
+    if (!m_watchdog.initialize(wdt_config)) {  // 30 second timeout
         ESP_LOGE(TAG, "Failed to initialize WatchdogSupervisor");
         return false;
     }

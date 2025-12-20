@@ -8,13 +8,14 @@
 
 #pragma once
 
-#include "core/EventBus.h"
+#include "core/eventbus/EventBus.h"
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include <cstdint>
 
+#include "cfg/Uart_cfg.hpp"
 /**
  * @brief UART Driver
  * 
@@ -84,9 +85,5 @@ private:
     bool m_running;
     
     static const char* TAG;
-    static constexpr int TASK_STACK_SIZE = 4096;
-    static constexpr int TASK_PRIORITY = 4;
-    static constexpr BaseType_t TASK_CORE = 0;  // Core 0
-    static constexpr size_t UART_RX_BUF_SIZE = 1024;
 };
 

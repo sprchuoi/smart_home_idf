@@ -34,12 +34,13 @@ bool UartDriver::initialize(uart_port_t uart_num,
     
     // Configure UART
     uart_config_t uart_config = {
-        .baud_rate = baud_rate,
+        .baud_rate = UART_DEFAULT_BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
+        .parity    = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
+        .rx_flow_ctrl_thresh = 0,
+        .flags = 0
     };
     
     esp_err_t err = uart_driver_install(m_uart_num, UART_RX_BUF_SIZE, 0, 20, &m_uart_queue, 0);
@@ -74,11 +75,11 @@ bool UartDriver::initialize(uart_port_t uart_num,
     BaseType_t result = xTaskCreatePinnedToCore(
         taskEntry,
         "UartDriver",
-        TASK_STACK_SIZE,
+        UART_TASK_STACK_SIZE,
         this,
-        TASK_PRIORITY,
+        UART_TASK_PRIORITY,
         &m_task_handle,
-        TASK_CORE
+        UART_TASK_CORE
     );
     
     if (result != pdPASS) {
@@ -89,7 +90,7 @@ bool UartDriver::initialize(uart_port_t uart_num,
     
     m_initialized = true;
     ESP_LOGI(TAG, "UartDriver initialized (UART%d, %d baud, Core %d)",
-            uart_num, baud_rate, TASK_CORE);
+            uart_num, baud_rate, UART_TASK_CORE);
     return true;
 }
 
@@ -146,49 +147,75 @@ size_t UartDriver::write(const uint8_t* data, size_t data_len) {
     return (len > 0) ? static_cast<size_t>(len) : 0;
 }
 
-void UartDriver::taskLoop() {
+void UartDriver::taskLoop()
+{
     ESP_LOGI(TAG, "UART task started on Core %d", xPortGetCoreID());
-    
+
     uart_event_t event;
-    uint8_t* buffer = new uint8_t[UART_RX_BUF_SIZE];
-    
+    uint8_t buffer[UART_RX_BUF_SIZE];
+
     while (m_running) {
-        // Wait for UART event from queue (ISR puts events here)
         if (xQueueReceive(m_uart_queue, &event, portMAX_DELAY) == pdTRUE) {
             switch (event.type) {
-                case UART_DATA:
-                    // Read data
-                    size_t len = read(buffer, UART_RX_BUF_SIZE, 0);
-                    if (len > 0) {
-                        // Publish UART data event
-                        EventMessage uart_event;
-                        uart_event.type = EventType::UART_DATA_RECEIVED;
-                        uart_event.source = EventSource::UART_DRIVER;
-                        uart_event.destination = EventSource::APPLICATION;
-                        uart_event.payload.uart_data.data = buffer;
-                        uart_event.payload.uart_data.data_len = len;
-                        
-                        EventBus::getInstance().publish(uart_event);
-                    }
-                    break;
-                    
-                case UART_FIFO_OVF:
-                    ESP_LOGW(TAG, "UART FIFO overflow");
-                    uart_flush_input(m_uart_num);
-                    break;
-                    
-                case UART_BUFFER_FULL:
-                    ESP_LOGW(TAG, "UART buffer full");
-                    uart_flush_input(m_uart_num);
-                    break;
-                    
-                default:
-                    break;
+
+            case UART_DATA: {
+                size_t len = read(buffer, UART_RX_BUF_SIZE, 0);
+                if (len > 0) {
+                    EventMessage uart_event{};
+                    uart_event.type = EventType::UART_DATA_RECEIVED;
+                    uart_event.source = EventSource::UART_DRIVER;
+                    uart_event.destination = EventSource::APPLICATION;
+
+                    memcpy(uart_event.payload.uart_data.data, buffer, len);
+                    uart_event.payload.uart_data.data_len = len;
+
+                    EventBus::getInstance().publish(uart_event);
+                }
+                break;
+            }
+
+            case UART_FIFO_OVF:
+                ESP_LOGW(TAG, "UART FIFO overflow");
+                uart_flush_input(m_uart_num);
+                xQueueReset(m_uart_queue);
+                break;
+
+            case UART_BUFFER_FULL:
+                ESP_LOGW(TAG, "UART buffer full");
+                uart_flush_input(m_uart_num);
+                xQueueReset(m_uart_queue);
+                break;
+
+            case UART_BREAK:
+                ESP_LOGI(TAG, "UART RX break");
+                break;
+
+            case UART_PARITY_ERR:
+                ESP_LOGI(TAG, "UART parity error");
+                break;
+
+            case UART_FRAME_ERR:
+                ESP_LOGI(TAG, "UART frame error");
+                break;
+
+            case UART_DATA_BREAK:
+                ESP_LOGI(TAG, "UART data break");
+                break;
+
+            case UART_PATTERN_DET:
+                ESP_LOGI(TAG, "UART pattern detected");
+                break;
+
+            case UART_EVENT_MAX:
+                ESP_LOGW(TAG, "UART event max");
+                break;
+
+            default:
+                ESP_LOGW(TAG, "Unhandled UART event: %d", event.type);
+                break;
             }
         }
     }
-    
-    delete[] buffer;
 }
 
 void UartDriver::taskEntry(void* parameter) {

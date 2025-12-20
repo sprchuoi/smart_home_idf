@@ -15,6 +15,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "uart/cfg/Uart_cfg.hpp"
 
 /**
  * @brief Event types in the system
@@ -29,6 +30,7 @@ enum class EventType : uint8_t {
     WIFI_ERROR,
     
     // MQTT Events
+    MQTT_CONNECTING,
     MQTT_CONNECTED,
     MQTT_DISCONNECTED,
     MQTT_PUBLISHED,
@@ -103,8 +105,8 @@ union EventPayload {
     } mqtt_data;
     
     struct {
-        const char* error_msg;
         int error_code;
+        char error_msg[128];
     } error_info;
     
     struct {
@@ -117,8 +119,8 @@ union EventPayload {
     } ota_info;
     
     struct {
-        uint8_t* data;
-        size_t data_len;
+        uint8_t data[UART_RX_BUF_SIZE];
+        size_t  data_len;
     } uart_data;
     
     struct {
@@ -167,6 +169,12 @@ public:
      * @return true if published successfully
      */
     bool publish(const EventMessage& event);
+
+    /**
+     * @brief Reset the event queue
+     * @return true on success
+     */
+    bool reset();
     
     /**
      * @brief Subscribe to events of a specific type
