@@ -1,0 +1,20 @@
+# Python dependencies for ESP32 Smart Home project
+
+# ESP-IDF tools (installed via ESP-IDF installer)
+# idf_tools.py handles these
+
+# Documentation tools
+sphinx>=5.0.0
+sphinx-rtd-theme>=1.0.0
+myst-parser>=0.18.0
+breathe>=4.35.0
+doxygen>=1.9.0
+
+# Testing (optional)
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Code quality
+pylint>=2.15.0
+black>=22.0.0
+

@@ -1,0 +1,45 @@
+# Build artifacts
+build/
+sdkconfig
+sdkconfig.old
+*.pyc
+__pycache__/
+
+# Documentation
+docs/_build/
+docs/_static/logo.png
+docs/_static/favicon.ico
+doxygen/
+*.tag
+doxygen_warnings.log
+
+# Test artifacts
+tests/*.xml
+tests/*.log
+qemu/
+ci_report.txt
+ci_summary.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ESP-IDF
+dependencies.lock
+
+# Python
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# Logs
+*.log
+

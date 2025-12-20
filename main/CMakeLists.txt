@@ -1,0 +1,40 @@
+idf_component_register(
+    SRCS 
+        "main.cpp"
+        "app/Application.cpp"
+        "core/EventBus.cpp"
+        "core/AppStateMachine.cpp"
+        "core/AudioStateMachine.cpp"
+        "core/PowerManager.cpp"
+        "core/WatchdogSupervisor.cpp"
+        "services/WifiService.cpp"
+        "services/WifiConfigService.cpp"
+        "services/MqttService.cpp"
+        "services/WakeWordService.cpp"
+        "services/AudioPipeline.cpp"
+        "services/OTAService.cpp"
+        "drivers/OledDisplay.cpp"
+        "drivers/UartDriver.cpp"
+        "error/ErrorHandler.cpp"
+    INCLUDE_DIRS 
+        "."
+        "app"
+        "core"
+        "services"
+        "drivers"
+        "error"
+    REQUIRES 
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        mqtt
+        driver
+        esp_timer
+        esp_https_ota
+        esp_sleep
+        esp_task_wdt
+        i2s
+        uart
+)
+
