@@ -100,6 +100,8 @@ void WakeWordService::taskLoop() {
     }
     
     delete[] audio_buffer;
+    
+    vTaskDelete(NULL);
 }
 
 void WakeWordService::processAudioData(const uint8_t* audio_data, size_t data_len) {
@@ -133,8 +135,8 @@ bool WakeWordService::initializeESP_SR() {
 }
 
 void WakeWordService::taskEntry(void* parameter) {
-    WakeWordService* service = static_cast<WakeWordService*>(parameter);
-    service->taskLoop();
+    static_cast<WakeWordService*>(parameter)->taskLoop();
+    vTaskDelete(NULL); // safety net (never reached)
 }
 
 void WakeWordService::publishWakeWordEvent() {

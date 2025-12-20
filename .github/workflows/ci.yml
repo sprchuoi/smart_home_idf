@@ -63,6 +63,12 @@ jobs:
         if [ -f requirements.txt ]; then
           pip install -r requirements.txt
         fi
+        ./make.sh setup
+        
+    - name: Create sdkconfig.defaults
+      run: |
+        echo 'CONFIG_WIFI_SSID="CI_WIFI"' >> sdkconfig.defaults
+        echo 'CONFIG_WIFI_PASSWORD="CI_PASS"' >> sdkconfig.defaults
     
     - name: Build project
       run: |

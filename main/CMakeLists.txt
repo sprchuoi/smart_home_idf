@@ -10,6 +10,7 @@ idf_component_register(
         "core/watchdog/WatchdogSupervisor.cpp"
         "services/wifi/WifiService.cpp"
         "services/wifi/WifiConfigService.cpp"
+        "services/wifi/WifiProvisioning.cpp"
         "services/mqtt/MqttService.cpp"
         "services/wakeup/WakeWordService.cpp"
         "services/audio/AudioPipeline.cpp"
@@ -33,5 +34,10 @@ idf_component_register(
         driver
         esp_timer
         esp_https_ota
-        esp_system 
+        esp_system
+        console
+)
+
+set(SDKCONFIG_DEFAULTS
+    sdkconfig.defaults
 )

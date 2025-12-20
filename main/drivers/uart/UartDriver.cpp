@@ -219,8 +219,9 @@ void UartDriver::taskLoop()
 }
 
 void UartDriver::taskEntry(void* parameter) {
-    UartDriver* uart = static_cast<UartDriver*>(parameter);
-    uart->taskLoop();
+    static_cast<UartDriver*>(parameter)->taskLoop();
+    vTaskDelete(NULL); // safety net (never reached)
+    
 }
 
 void UartDriver::uartIsrHandler(void* arg) {

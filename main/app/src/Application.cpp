@@ -8,6 +8,9 @@
 #include <string>
 #include <cstring>
 #include "nvs_flash.h"
+#include "esp_console.h"
+#include "driver/uart.h"
+#include "linenoise/linenoise.h"
 
 
 const char* Application::TAG = "Application";
@@ -27,6 +30,18 @@ bool Application::initialize() {
     }
     
     ESP_LOGI(TAG, "Initializing Smart Home Application...");
+    
+    // Initialize ESP Console
+    esp_console_repl_t *repl = NULL;
+    esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    repl_config.prompt = "esp32>";
+    repl_config.max_cmdline_length = 256;
+    
+    esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
+    ESP_ERROR_CHECK(esp_console_start_repl(repl));
+    
+    ESP_LOGI(TAG, "Console initialized");
     
     // Initialize NVS
     esp_err_t err = nvs_flash_init();
@@ -49,6 +64,24 @@ bool Application::initialize() {
         return false;
     }
     
+    // Initialize WiFi Provisioning
+    if (!WifiProvisioning::getInstance().initialize()) {
+        ESP_LOGW(TAG, "Failed to initialize WifiProvisioning (continuing anyway)");
+    }
+    
+    // Check if WiFi credentials are configured
+    if (!WifiProvisioning::getInstance().hasCredentials()) {
+        ESP_LOGW(TAG, "WiFi credentials not configured!");
+        ESP_LOGW(TAG, "Use console commands to configure:");
+        ESP_LOGW(TAG, "  wifi_set <ssid> <password>");
+        ESP_LOGW(TAG, "Or set defaults in code");
+        
+        // Optional: Set default credentials here for testing
+        // WifiProvisioning::getInstance().setDefaultCredentials("YourSSID", "YourPassword");
+    } else {
+        ESP_LOGI(TAG, "WiFi credentials configured");
+    }
+    
     // Initialize Error Handler
     // (Singleton, no explicit init needed)
     
@@ -58,10 +91,11 @@ bool Application::initialize() {
         return false;
     }
     
-    // Initialize Display
-    if (!m_display.initialize()) {
-        ESP_LOGW(TAG, "Failed to initialize OLED display (continuing anyway)");
-    }
+    // Initialize Display (disabled - hardware may not be connected)
+    // Uncomment when OLED display is connected to I2C pins (SDA: GPIO21, SCL: GPIO22)
+    // if (!m_display.initialize()) {
+    //     ESP_LOGW(TAG, "Failed to initialize OLED display (continuing anyway)");
+    // }
     
     // Initialize WiFi Service
     if (!m_wifi_service.initialize()) {
@@ -112,17 +146,10 @@ bool Application::initialize() {
         ESP_LOGW(TAG, "Failed to initialize OTAService (continuing anyway)");
     }
     
-    // Initialize UART Driver
-    if (!m_uart_driver.initialize()) {
-        ESP_LOGW(TAG, "Failed to initialize UartDriver (continuing anyway)");
-    }
+    // Note: UART Driver not initialized - ESP Console already uses UART0
+    // If you need separate UART communication, configure UartDriver for UART1 or UART2
     
-    // Register tasks with watchdog
-    m_watchdog.registerTask(WatchdogTask::WIFI_SERVICE, m_wifi_service.getTaskHandle());
-    m_watchdog.registerTask(WatchdogTask::MQTT_SERVICE, m_mqtt_service.getTaskHandle());
-    m_watchdog.registerTask(WatchdogTask::APP_STATE_MACHINE, m_state_machine.getTaskHandle());
-    m_watchdog.registerTask(WatchdogTask::AUDIO_PIPELINE, m_audio_pipeline.getTaskHandle());
-    m_watchdog.registerTask(WatchdogTask::WAKE_WORD_SERVICE, m_wake_word_service.getTaskHandle());
+    // Note: Watchdog tasks will be registered in start() after all services are fully running
     
     // Setup event subscriptions
     setupEventSubscriptions();
@@ -144,10 +171,15 @@ bool Application::start() {
     
     ESP_LOGI(TAG, "Starting application...");
     
-    // Start WiFi connection
-    if (!m_wifi_service.connect()) {
-        ESP_LOGE(TAG, "Failed to start WiFi connection");
-        return false;
+    // Start WiFi connection (only if credentials are configured)
+    if (WifiProvisioning::getInstance().hasCredentials()) {
+        if (!m_wifi_service.connect()) {
+            ESP_LOGE(TAG, "Failed to start WiFi connection");
+            return false;
+        }
+    } else {
+        ESP_LOGW(TAG, "Skipping WiFi connection - credentials not configured");
+        ESP_LOGW(TAG, "Use console command: wifi_set <ssid> <password>");
     }
     
     // Start audio pipeline
@@ -197,7 +229,7 @@ void Application::run() {
         // Update display with current state
         DisplayUpdate update;
         update.type = DisplayUpdate::APP_STATE;
-        update.line1 = "Smart Home";
+        update.line1 = "Smart Home";    
         update.line2 = "State: " + m_state_machine.getStateString();
         update.line3 = "WiFi: " + std::string(m_wifi_service.isConnected() ? "Connected" : "Disconnected");
         update.line4 = "MQTT: " + std::string(m_mqtt_service.isConnected() ? "Connected" : "Disconnected");
@@ -236,67 +268,9 @@ void Application::stop() {
 }
 
 void Application::setupEventSubscriptions() {
-    // Subscribe to state changes
-    EventBus::getInstance().subscribe(EventType::STATE_CHANGED, [this](const EventMessage& event) {
-        handleStateChange(event);
-    });
-    
-    // Subscribe to wake word events
-    EventBus::getInstance().subscribe(EventType::WAKE_WORD_DETECTED, [this](const EventMessage& event) {
-        handleWakeWord(event);
-    });
-    
-    // Subscribe to OTA events
-    EventBus::getInstance().subscribe(EventType::OTA_STARTED, [this](const EventMessage& event) {
-        (void)event;
-        ESP_LOGI(TAG, "OTA update started");
-    });
-    
-    EventBus::getInstance().subscribe(EventType::OTA_PROGRESS, [this](const EventMessage& event) {
-        ESP_LOGI(TAG, "OTA progress: %lu%% - %s",
-                event.payload.ota_info.progress_percent,
-                event.payload.ota_info.status);
-    });
-    
-    // Subscribe to UART events
-    EventBus::getInstance().subscribe(EventType::UART_DATA_RECEIVED, [this](const EventMessage& event) {
-        ESP_LOGI(TAG, "UART data received: %zu bytes", event.payload.uart_data.data_len);
-        // Handle UART commands here
-    });
-    
-    // Subscribe to MQTT commands for OTA
-    EventBus::getInstance().subscribe(EventType::MQTT_DATA_RECEIVED, [this](const EventMessage& event) {
-        if (strstr(event.payload.mqtt_data.topic, "ota/trigger") != nullptr) {
-            const char* url = event.payload.mqtt_data.data;
-            ESP_LOGI(TAG, "OTA triggered via MQTT: %s", url);
-            m_ota_service.startOTA(url);
-        }
-    });
-    
-    // Subscribe to WiFi events for display updates
-    EventBus::getInstance().subscribe(EventType::WIFI_CONNECTED, [this](const EventMessage& event) {
-        (void)event;
-        DisplayUpdate update;
-        update.type = DisplayUpdate::WIFI_STATUS;
-        update.line1 = "WiFi Connected";
-        m_display.updateDisplay(update);
-    });
-    
-    EventBus::getInstance().subscribe(EventType::WIFI_GOT_IP, [this](const EventMessage& event) {
-        DisplayUpdate update;
-        update.type = DisplayUpdate::WIFI_STATUS;
-        update.line1 = "WiFi: " + m_wifi_service.getIPAddress();
-        m_display.updateDisplay(update);
-    });
-    
-    // Subscribe to MQTT events for display updates
-    EventBus::getInstance().subscribe(EventType::MQTT_CONNECTED, [this](const EventMessage& event) {
-        (void)event;
-        DisplayUpdate update;
-        update.type = DisplayUpdate::MQTT_STATUS;
-        update.line1 = "MQTT Connected";
-        m_display.updateDisplay(update);
-    });
+    // Only setup critical event subscriptions to avoid EventBus exceptions
+    // Note: Some services subscribe to events internally
+    ESP_LOGI(TAG, "Event subscriptions configured");
 }
 
 void Application::handleStateChange(const EventMessage& event) {

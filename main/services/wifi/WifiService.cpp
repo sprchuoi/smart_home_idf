@@ -9,6 +9,8 @@
 
 const char* WifiService::TAG = "WifiService";
 
+
+
 WifiService::WifiService()
     : m_task_handle(nullptr)
     , m_netif(nullptr)
@@ -26,13 +28,17 @@ bool WifiService::initialize() {
     if (m_initialized) {
         return true;
     }
-    
+    // esp-netif
+    ESP_ERROR_CHECK(esp_netif_init());
+    //  Event loop
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
     // Initialize network interface
     m_netif = esp_netif_create_default_wifi_sta();
     if (m_netif == nullptr) {
         ESP_LOGE(TAG, "Failed to create default WiFi STA netif");
         return false;
     }
+    assert(m_netif);
     
     // Initialize WiFi with default config
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -97,11 +103,21 @@ bool WifiService::connect() {
         return false;
     }
     
-    // Get credentials from config service
-    char ssid[33] = {0};
-    char password[65] = {0};
+    // Check if credentials are configured
+    if (!WifiConfigService::getInstance().hasCredentials()) {
+        ESP_LOGE(TAG, "WiFi credentials not configured!");
+        ESP_LOGE(TAG, "Use console command: wifi_set <ssid> <password>");
+        ErrorHandler::getInstance().reportError(
+            ErrorCategory::WIFI_ERROR,
+            ESP_ERR_NOT_FOUND,
+            "WiFi credentials not configured"
+        );
+        return false;
+    }
     
-    if (!WifiConfigService::getInstance().getSSID(ssid, sizeof(ssid))) {
+    // Get credentials from config service
+    
+    if (!WifiConfigService::getInstance().getSSID(g_wifi_cfg.ssid, sizeof(g_wifi_cfg.ssid))) {
         ESP_LOGE(TAG, "SSID not configured");
         ErrorHandler::getInstance().reportError(
             ErrorCategory::WIFI_ERROR,
@@ -111,7 +127,7 @@ bool WifiService::connect() {
         return false;
     }
     
-    if (!WifiConfigService::getInstance().getPassword(password, sizeof(password))) {
+    if (!WifiConfigService::getInstance().getPassword(g_wifi_cfg.password, sizeof(g_wifi_cfg.password))) {
         ESP_LOGE(TAG, "Password not configured");
         ErrorHandler::getInstance().reportError(
             ErrorCategory::WIFI_ERROR,
@@ -123,8 +139,8 @@ bool WifiService::connect() {
     
     // Configure WiFi
     wifi_config_t wifi_config = {};
-    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
+    strncpy((char*)wifi_config.sta.ssid, g_wifi_cfg.ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strncpy((char*)wifi_config.sta.password, g_wifi_cfg.password, sizeof(wifi_config.sta.password) - 1);
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     
     esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
@@ -166,7 +182,7 @@ bool WifiService::connect() {
     
     m_should_reconnect = true;
     m_reconnect_attempts = 0;
-    ESP_LOGI(TAG, "WiFi connection initiated to: %s", ssid);
+    ESP_LOGI(TAG, "WiFi connection initiated to: %s", g_wifi_cfg.ssid);
     return true;
 }
 

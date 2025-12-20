@@ -15,6 +15,7 @@
 #include "core/watchdog/WatchdogSupervisor.h"
 #include "services/wifi/WifiService.h"
 #include "services/wifi/WifiConfigService.h"
+#include "services/wifi/WifiProvisioning.h"
 #include "services/mqtt/MqttService.h"
 #include "services/wakeup/WakeWordService.h"
 #include "services/audio/AudioPipeline.h"

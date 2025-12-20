@@ -224,25 +224,29 @@ void AudioPipeline::resume() {
     }
 }
 
-void AudioPipeline::taskLoop() {
+void AudioPipeline::taskLoop()
+{
     ESP_LOGI(TAG, "Audio pipeline task started on Core %d", xPortGetCoreID());
-    
+
     uint8_t* dma_buffer = new uint8_t[DMA_BUFFER_SIZE];
-    
+
     while (m_running) {
         if (m_suspended) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
-        
-        // Read from I2S DMA
+
         size_t bytes_read = 0;
-        esp_err_t err = i2s_channel_read(m_rx_handle, dma_buffer, DMA_BUFFER_SIZE, &bytes_read, portMAX_DELAY);
-        
+        esp_err_t err = i2s_channel_read(
+            m_rx_handle,
+            dma_buffer,
+            DMA_BUFFER_SIZE,
+            &bytes_read,
+            portMAX_DELAY
+        );
+
         if (err == ESP_OK && bytes_read > 0) {
-            // Send to ring buffer (non-blocking)
-            BaseType_t result = xRingbufferSend(m_ring_buffer, dma_buffer, bytes_read, 0);
-            if (result != pdTRUE) {
+            if (xRingbufferSend(m_ring_buffer, dma_buffer, bytes_read, 0) != pdTRUE) {
                 ESP_LOGW(TAG, "Ring buffer full, dropping audio data");
             }
         } else if (err != ESP_OK) {
@@ -254,13 +258,17 @@ void AudioPipeline::taskLoop() {
             );
         }
     }
-    
-    delete[] dma_buffer;
-}
 
-void AudioPipeline::taskEntry(void* parameter) {
-    AudioPipeline* pipeline = static_cast<AudioPipeline*>(parameter);
-    pipeline->taskLoop();
+    ESP_LOGI(TAG, "Audio pipeline stopping");
+
+    delete[] dma_buffer;
+
+    vTaskDelete(NULL);
+}
+void AudioPipeline::taskEntry(void* parameter)
+{
+    static_cast<AudioPipeline*>(parameter)->taskLoop();
+    vTaskDelete(NULL); // safety net (never reached)
 }
 
 void AudioPipeline::i2sIsrHandler() {

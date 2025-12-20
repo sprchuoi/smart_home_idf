@@ -34,6 +34,7 @@ Thumbs.db
 
 # ESP-IDF
 dependencies.lock
+sdkconfig.defaults
 
 # Python
 *.egg-info/

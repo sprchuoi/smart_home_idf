@@ -85,9 +85,16 @@ bool OledDisplay::initialize(int sda_pin, int scl_pin, uint8_t i2c_addr) {
         },
     };
     
+    // Temporarily reduce I2C log level to suppress NACK errors when display not connected
+    esp_log_level_t old_level = esp_log_level_get("i2c.master");
+    esp_log_level_set("i2c.master", ESP_LOG_NONE);
+    
     esp_err_t err = i2c_new_master_bus(&i2c_bus_config, &m_i2c_bus);
+    
+    esp_log_level_set("i2c.master", old_level);
+    
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create I2C bus: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Failed to create I2C bus (display may not be connected)");
         vQueueDelete(m_update_queue);
         vSemaphoreDelete(m_mutex);
         m_update_queue = nullptr;
@@ -102,9 +109,12 @@ bool OledDisplay::initialize(int sda_pin, int scl_pin, uint8_t i2c_addr) {
         .scl_speed_hz = 100000,
     };
     
+    esp_log_level_set("i2c.master", ESP_LOG_NONE);
     err = i2c_master_bus_add_device(m_i2c_bus, &dev_cfg, &m_i2c_dev);
+    esp_log_level_set("i2c.master", old_level);
+    
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add I2C device: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Failed to add I2C device (display not connected)");
         i2c_del_master_bus(m_i2c_bus);
         m_i2c_bus = nullptr;
         vQueueDelete(m_update_queue);
@@ -197,8 +207,8 @@ void OledDisplay::stop() {
 }
 
 void OledDisplay::taskEntry(void* parameter) {
-    OledDisplay* instance = static_cast<OledDisplay*>(parameter);
-    instance->taskLoop();
+    static_cast<OledDisplay*>(parameter)->taskLoop();
+    vTaskDelete(NULL); // safety net (never reached)
 }
 
 void OledDisplay::taskLoop() {
@@ -216,7 +226,8 @@ void OledDisplay::taskLoop() {
 
 void OledDisplay::renderUpdate(const DisplayUpdate& update) {
     if (xSemaphoreTake(m_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
-        return;
+        ESP_LOGW(TAG, "Failed to acquire display mutex");
+        // should not return here to avoid blocking updates
     }
     
     switch (update.type) {

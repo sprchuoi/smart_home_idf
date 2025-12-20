@@ -29,13 +29,12 @@ bool WatchdogSupervisor::initialize(const esp_task_wdt_config_t wdt_config) {
     
     m_timeout_seconds = wdt_config.timeout_ms / 1000; // set timeout from config (convert ms to seconds)
     
-    // Initialize ESP task watchdog
-    esp_err_t err = esp_task_wdt_init(&wdt_config);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize task watchdog: %s", esp_err_to_name(err));
+    esp_err_t err = esp_task_wdt_add(NULL); // add current task
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Failed to add task watchdog: %s", esp_err_to_name(err));
         return false;
     }
-    
+
     // Create event group for heartbeat monitoring
     m_heartbeat_group = xEventGroupCreate();
     if (m_heartbeat_group == nullptr) {
