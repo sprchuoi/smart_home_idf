@@ -2,7 +2,10 @@
 
 A production-ready, low-power, real-time, voice-activated ESP32 smart home firmware using ESP-IDF v5.x, FreeRTOS, and modern C++ architecture.
 
-📖 **Documentation**: [View Full Documentation](https://yourusername.github.io/smart_home/) | [Build Locally](./docs/)
+[![CI/CD Pipeline](https://github.com/sprchuoi/smart_home_idf/actions/workflows/ci.yml/badge.svg)](https://github.com/sprchuoi/smart_home_idf/actions/workflows/ci.yml)
+[![Documentation](https://github.com/sprchuoi/smart_home_idf/actions/workflows/docs.yml/badge.svg)](https://github.com/sprchuoi/smart_home_idf/actions/workflows/docs.yml)
+
+📖 **[View Full Documentation](https://sprchuoi.github.io/smart_home_idf/)** | 📚 **[API Reference](https://sprchuoi.github.io/smart_home_idf/doxygen/)**
 
 ## Features
 

@@ -48,7 +48,7 @@ Subscribe to topics:
 * ``smart_home/wake_word``
 
 Troubleshooting
---------------
+---------------
 
 See :doc:`getting-started` for troubleshooting tips.
 

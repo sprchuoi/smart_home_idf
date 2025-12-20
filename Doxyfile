@@ -4,7 +4,7 @@ PROJECT_NAME           = "ESP32 Smart Home"
 PROJECT_NUMBER         = "1.0.0"
 PROJECT_BRIEF          = "Production-ready ESP32 smart home firmware"
 
-OUTPUT_DIRECTORY       = docs
+OUTPUT_DIRECTORY       = doxygen
 INPUT                  = main \
                          README.md \
                          ARCHITECTURE.md \

@@ -11,6 +11,13 @@ ESP32 Smart Home Documentation
    development
    deployment
 
+.. note::
+   **Additional Resources:**
+   
+   - `Doxygen API Reference <doxygen/index.html>`_
+   - `GitHub Repository <https://github.com/sprchuoi/smart_home_idf>`_
+   - `Report Issues <https://github.com/sprchuoi/smart_home_idf/issues>`_
+
 Welcome to the ESP32 Smart Home firmware documentation!
 
 This is a production-ready, low-power, real-time, voice-activated ESP32 smart home firmware with:
@@ -59,7 +66,7 @@ Features
      - Monitors 5 critical tasks with safe reset on timeout
 
 Architecture Overview
---------------------
+---------------------
 
 The system uses an event-driven architecture with:
 
@@ -68,7 +75,7 @@ The system uses an event-driven architecture with:
 * **Services**: Decoupled services communicating via events
 * **Drivers**: Hardware abstraction layer
 
-.. figure:: _static/architecture-overview.png
+.. figure:: _static/architecture-overview.svg
    :alt: System Architecture
    :align: center
 

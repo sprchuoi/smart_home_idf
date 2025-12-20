@@ -1,5 +1,5 @@
 Getting Started
-=============
+===============
 
 This guide will help you set up and build the ESP32 Smart Home firmware.
 
@@ -175,7 +175,7 @@ Build Failures
    ./make.sh build
 
 Permission Denied
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 

@@ -6,11 +6,18 @@ on:
     paths:
       - 'docs/**'
       - 'main/**'
+      - 'Doxyfile'
       - '*.md'
   workflow_dispatch:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
   build-docs:
@@ -26,28 +33,61 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+        cache: 'pip'
     
-    - name: Install dependencies
-      run: |
-        pip install -r docs/requirements.txt
-        pip install sphinx-autobuild
-    
-    - name: Generate Doxygen XML (if Doxyfile exists)
-      if: hashFiles('Doxyfile') != ''
+    - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y doxygen graphviz
-        doxygen Doxyfile || true
+        sudo apt-get install -y doxygen graphviz plantuml default-jre
+    
+    - name: Install Python dependencies
+      run: |
+        pip install -r docs/requirements.txt
+    
+    - name: Generate Doxygen documentation
+      run: |
+        doxygen Doxyfile
+        echo "✓ Doxygen generation complete"
     
     - name: Build Sphinx documentation
       run: |
         cd docs
         make html
+        echo "✓ Sphinx build complete"
+    
+    - name: Create docs root with index redirect
+      run: |
+        mkdir -p _site
+        cp -r docs/_build/html/* _site/
+        cp -r doxygen/html _site/doxygen
+        
+        # Create root index.html that redirects to Sphinx docs
+        cat > _site/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>ESP32 Smart Home Documentation</title>
+            <meta http-equiv="refresh" content="0; url=./index.html">
+            <link rel="canonical" href="./index.html">
+        </head>
+        <body>
+            <p>Redirecting to <a href="./index.html">documentation</a>...</p>
+        </body>
+        </html>
+        EOF
+        
+        # Create .nojekyll to prevent GitHub Pages from ignoring files
+        touch _site/.nojekyll
+        
+        echo "✓ Documentation site prepared"
+    
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v2
+      with:
+        path: '_site'
     
     - name: Deploy to GitHub Pages
-      uses: peaceiris/actions-gh-pages@v3
-      if: github.ref == 'refs/heads/main'
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        publish_dir: ./docs/_build/html
+      id: deployment
+      uses: actions/deploy-pages@v2
 

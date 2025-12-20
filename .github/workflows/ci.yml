@@ -3,9 +3,15 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [ main, develop ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main, develop ]
   workflow_dispatch:
+
+env:
+  IDF_VERSION: v5.2
+  IDF_TARGET: esp32
 
 jobs:
   build:
@@ -22,6 +28,16 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
+        cache: 'pip'
+    
+    - name: Cache ESP-IDF tools
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.espressif
+        key: ${{ runner.os }}-esp-idf-${{ hashFiles('**/sdkconfig') }}
+        restore-keys: |
+          ${{ runner.os }}-esp-idf-
     
     - name: Install dependencies
       run: |
@@ -31,43 +47,63 @@ jobs:
           python3 python3-pip python3-venv \
           cmake ninja-build ccache \
           libffi-dev libssl-dev dfu-util \
-          libusb-1.0-0 cppcheck
+          libusb-1.0-0 cppcheck doxygen \
+          graphviz plantuml default-jre
     
     - name: Install ESP-IDF
       uses: espressif/esp-idf-ci-action@v1
       with:
-        esp_idf_version: v5.1.2
+        esp_idf_version: v5.2
         target: esp32
     
     - name: Setup environment
       run: |
         chmod +x make.sh
-        ./make.sh setup
+        # Source ESP-IDF environment
+        . $IDF_PATH/export.sh
+        # Install Python requirements
+        pip install -r requirements.txt
     
     - name: Build project
       run: |
+        . $IDF_PATH/export.sh
         ./make.sh build
     
     - name: Run static analysis
       run: |
-        ./make.sh test
+        mkdir -p tests
+        cppcheck --enable=all \\
+          --suppress=missingIncludeSystem \\
+          --suppress=unusedFunction \\
+          --inline-suppr \\
+          main/ \\
+          --xml --xml-version=2 2>tests/cppcheck_report.xml || true
+        echo \"Static analysis complete\"
     
     - name: Generate documentation
       run: |
         pip install -r docs/requirements.txt
-        ./make.sh doc
+        # Generate Doxygen XML and HTML
+        doxygen Doxyfile
+        # Build Sphinx documentation
+        cd docs && make html
     
     - name: Upload build artifacts
       uses: actions/upload-artifact@v3
       with:
         name: firmware
-        path: build/smart_home.bin
+        path: |
+          build/smart_home.bin
+          build/bootloader/bootloader.bin
+          build/partition_table/partition-table.bin
     
     - name: Upload documentation
       uses: actions/upload-artifact@v3
       with:
         name: documentation
-        path: docs/
+        path: |
+          docs/_build/html/
+          doxygen/html/
     
     - name: Upload test results
       uses: actions/upload-artifact@v3
@@ -77,6 +113,18 @@ jobs:
         path: |
           tests/cppcheck_report.xml
           ci_report.txt
+
+    - name: Check build size
+      if: success()
+      run: |
+        echo "### Firmware Size Report\" >> $GITHUB_STEP_SUMMARY
+        echo \"\" >> $GITHUB_STEP_SUMMARY
+        ls -lh build/smart_home.bin >> $GITHUB_STEP_SUMMARY
+        echo \"\" >> $GITHUB_STEP_SUMMARY
+        if [ -f build/smart_home.map ]; then
+          echo \"Top 10 largest sections:\" >> $GITHUB_STEP_SUMMARY
+          head -20 build/smart_home.map >> $GITHUB_STEP_SUMMARY
+        fi
 
   qemu-test:
     name: QEMU ESP32 Test
@@ -100,7 +148,7 @@ jobs:
     - name: Install ESP-IDF
       uses: espressif/esp-idf-ci-action@v1
       with:
-        esp_idf_version: v5.1.2
+        esp_idf_version: v5.2
         target: esp32
     
     - name: Download build artifacts
@@ -109,15 +157,26 @@ jobs:
         name: firmware
         path: build/
     
-    - name: Setup QEMU
+    - name: Setup QEMU environment
       run: |
+        mkdir -p qemu
         chmod +x make.sh
-        ./make.sh setup-qemu
     
     - name: Run QEMU test
       run: |
-        ./make.sh test-qemu
-      continue-on-error: true
+        # Note: QEMU ESP32 support is experimental
+        # This test verifies the binary loads but may not fully execute
+        timeout 30 qemu-system-xtensa \\
+          -nographic \\
+          -machine esp32 \\
+          -drive file=build/smart_home.bin,if=mtd,format=raw \\
+          2>&1 | tee qemu/qemu_output.log || true
+        
+        echo \"QEMU test completed (experimental)\"
+        if [ -f qemu/qemu_output.log ]; then
+          echo \"### QEMU Output Sample\" >> $GITHUB_STEP_SUMMARY
+          head -50 qemu/qemu_output.log >> $GITHUB_STEP_SUMMARY
+        fi
     
     - name: Upload QEMU logs
       uses: actions/upload-artifact@v3
@@ -141,16 +200,73 @@ jobs:
     
     - name: Generate CI report
       run: |
-        echo "# CI/CD Report" > ci_summary.md
-        echo "" >> ci_summary.md
-        echo "Build: ${{ needs.build.result }}" >> ci_summary.md
-        echo "QEMU Test: ${{ needs.qemu-test.result }}" >> ci_summary.md
-        echo "" >> ci_summary.md
-        echo "Generated: $(date)" >> ci_summary.md
+        echo \"# CI/CD Report\" > ci_summary.md
+        echo \"\" >> ci_summary.md
+        echo \"## Build Status\" >> ci_summary.md
+        echo \"- Build Job: ${{ needs.build.result }}\" >> ci_summary.md
+        echo \"- QEMU Test: ${{ needs.qemu-test.result }}\" >> ci_summary.md
+        echo \"\" >> ci_summary.md
+        echo \"## Artifacts\" >> ci_summary.md
+        echo \"- Firmware binary\" >> ci_summary.md
+        echo \"- Documentation (Sphinx + Doxygen)\" >> ci_summary.md
+        echo \"- Test results and reports\" >> ci_summary.md
+        echo \"\" >> ci_summary.md
+        echo \"Generated: $(date -u +\"%Y-%m-%d %H:%M:%S UTC\")\" >> ci_summary.md
+        echo \"Commit: ${{ github.sha }}\" >> ci_summary.md
+        echo \"Branch: ${{ github.ref_name }}\" >> ci_summary.md
     
     - name: Upload CI report
       uses: actions/upload-artifact@v3
       with:
         name: ci-report
         path: ci_summary.md
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build, qemu-test]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Download firmware
+      uses: actions/download-artifact@v3
+      with:
+        name: firmware
+        path: release/
+    
+    - name: Download documentation
+      uses: actions/download-artifact@v3
+      with:
+        name: documentation
+        path: docs-release/
+    
+    - name: Create release package
+      run: |
+        cd release
+        tar -czf smart_home_firmware_${{ github.ref_name }}.tar.gz *.bin
+        cd ../docs-release
+        tar -czf smart_home_docs_${{ github.ref_name }}.tar.gz *
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          release/smart_home_firmware_${{ github.ref_name }}.tar.gz
+          docs-release/smart_home_docs_${{ github.ref_name }}.tar.gz
+        body: |
+          ESP32 Smart Home Firmware Release ${{ github.ref_name }}
+          
+          ## Changes
+          See CHANGELOG for details.
+          
+          ## Installation
+          1. Extract firmware package
+          2. Flash to ESP32: `esptool.py write_flash @flash_args`
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

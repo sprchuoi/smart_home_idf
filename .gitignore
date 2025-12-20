@@ -12,7 +12,8 @@ docs/_static/favicon.ico
 doxygen/
 *.tag
 doxygen_warnings.log
-
+html/
+xml/
 # Test artifacts
 tests/*.xml
 tests/*.log
