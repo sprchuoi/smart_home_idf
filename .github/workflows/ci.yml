@@ -53,7 +53,7 @@ jobs:
     - name: Install ESP-IDF
       uses: espressif/esp-idf-ci-action@v1
       with:
-        esp_idf_version: v5.2
+        esp_idf_version: v5.5
         target: esp32
     
     - name: Setup environment
@@ -148,7 +148,7 @@ jobs:
     - name: Install ESP-IDF
       uses: espressif/esp-idf-ci-action@v1
       with:
-        esp_idf_version: v5.2
+        esp_idf_version: v5.5
         target: esp32
     
     - name: Download build artifacts
