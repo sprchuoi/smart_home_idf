@@ -5,6 +5,7 @@
 
 #include "AppStateMachine.h"
 #include "error/ErrorHandler.h"
+#include "core/watchdog/WatchdogSupervisor.h"
 
 const char* AppStateMachine::TAG = "AppStateMachine";
 
@@ -116,6 +117,10 @@ void AppStateMachine::taskLoop() {
     // Process events from EventBus
     while (true) {
         EventBus::getInstance().processEvents();
+        // Feed watchdog for state machine and yield briefly
+        if (WatchdogSupervisor::getInstance()) {
+            WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::APP_STATE_MACHINE);
+        }
         vTaskDelay(pdMS_TO_TICKS(10));  // Small delay to prevent tight loop
     }
 }

@@ -6,6 +6,7 @@
 #include "WifiService.h"
 #include "error/ErrorHandler.h"
 #include <cstring>
+#include "core/watchdog/WatchdogSupervisor.h"
 
 const char* WifiService::TAG = "WifiService";
 
@@ -230,6 +231,10 @@ void WifiService::taskLoop() {
         // Task handles reconnection logic
         if (m_should_reconnect && !m_connected && m_initialized) {
             if (m_reconnect_attempts < 10) {
+                // Feed watchdog while waiting to reconnect
+                if (WatchdogSupervisor::getInstance()) {
+                    WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::WIFI_SERVICE);
+                }
                 vTaskDelay(pdMS_TO_TICKS(5000));  // Wait 5 seconds
                 ESP_LOGI(TAG, "Attempting WiFi reconnection (attempt %lu)", m_reconnect_attempts + 1);
                 esp_wifi_connect();
@@ -240,6 +245,10 @@ void WifiService::taskLoop() {
             }
         }
         
+        // Always feed watchdog at least once per loop and yield
+        if (WatchdogSupervisor::getInstance()) {
+            WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::WIFI_SERVICE);
+        }
         vTaskDelay(pdMS_TO_TICKS(1000));  // Check every second
     }
 }

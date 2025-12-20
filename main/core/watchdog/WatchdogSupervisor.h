@@ -76,6 +76,18 @@ public:
      */
     static void taskEntry(void* parameter);
 
+    /**
+     * @brief Set watchdog timeout for all tasks
+     * @param timeout_seconds Timeout in seconds
+     */
+    void setWatchdogTimeout(uint32_t timeout_seconds);
+
+    // Global instance accessors (used by services to feed supervisor)
+    static void setInstance(WatchdogSupervisor* instance);
+    static WatchdogSupervisor* getInstance();
+    // Static instance storage (definition in cpp)
+    static WatchdogSupervisor* s_instance;
+
 private:
     void taskLoop();
     void checkTaskHealth();

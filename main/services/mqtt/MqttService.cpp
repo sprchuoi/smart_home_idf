@@ -5,6 +5,7 @@
 
 #include "MqttService.h"
 #include "error/ErrorHandler.h"
+#include "core/watchdog/WatchdogSupervisor.h"
 #include <cstring>
 
 const char* MqttService::TAG = "MqttService";
@@ -193,6 +194,10 @@ void MqttService::taskLoop() {
     
     // Task can handle periodic operations or monitoring
     while (true) {
+        // Feed watchdog periodically
+        if (WatchdogSupervisor::getInstance()) {
+            WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::MQTT_SERVICE);
+        }
         vTaskDelay(pdMS_TO_TICKS(5000));  // Check every 5 seconds
         
         // Could add periodic health checks here

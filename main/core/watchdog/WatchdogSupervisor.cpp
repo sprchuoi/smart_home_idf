@@ -9,6 +9,17 @@
 
 const char* WatchdogSupervisor::TAG = "WatchdogSupervisor";
 
+// Static instance pointer
+WatchdogSupervisor* WatchdogSupervisor::s_instance = nullptr;
+
+void WatchdogSupervisor::setInstance(WatchdogSupervisor* instance) {
+    s_instance = instance;
+}
+
+WatchdogSupervisor* WatchdogSupervisor::getInstance() {
+    return s_instance;
+}
+
 WatchdogSupervisor::WatchdogSupervisor()
     : m_task_handle(nullptr)
     , m_heartbeat_group(nullptr)
@@ -61,6 +72,8 @@ bool WatchdogSupervisor::initialize(const esp_task_wdt_config_t wdt_config) {
     }
     
     m_initialized = true;
+    // Publish global instance for others to feed
+    WatchdogSupervisor::setInstance(this);
     ESP_LOGI(TAG, "WatchdogSupervisor initialized (timeout: %lu s, Core %d)",
             m_timeout_seconds, TASK_CORE);
     return true;
@@ -74,8 +87,16 @@ bool WatchdogSupervisor::registerTask(WatchdogTask task_id, TaskHandle_t task_ha
     // Add task to ESP task watchdog
     esp_err_t err = esp_task_wdt_add(task_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add task to watchdog: %s", esp_err_to_name(err));
-        return false;
+        if (err == ESP_ERR_INVALID_ARG) {
+            ESP_LOGW(TAG, "Task handle invalid when registering for watchdog (already deleted?)");
+            return false;
+        } else if (err == ESP_ERR_NOT_FOUND || err == ESP_ERR_INVALID_STATE) {
+            // Task already registered or WDT not initialized for this task; log and continue
+            ESP_LOGW(TAG, "esp_task_wdt_add returned %s when adding task handle", esp_err_to_name(err));
+        } else {
+            ESP_LOGE(TAG, "Failed to add task to watchdog: %s", esp_err_to_name(err));
+            return false;
+        }
     }
     
     m_registered_tasks[static_cast<size_t>(task_id)] = task_handle;
@@ -156,6 +177,8 @@ void WatchdogSupervisor::stop() {
     if (m_initialized) {
         esp_task_wdt_deinit();
         m_initialized = false;
+        // Clear global instance
+        WatchdogSupervisor::setInstance(nullptr);
     }
 }
 
@@ -245,5 +268,10 @@ void WatchdogSupervisor::triggerSafeReset(const char* reason) {
 void WatchdogSupervisor::taskEntry(void* parameter) {
     WatchdogSupervisor* wd = static_cast<WatchdogSupervisor*>(parameter);
     wd->taskLoop();
+}
+
+void WatchdogSupervisor::setWatchdogTimeout(uint32_t timeout_seconds) {
+    m_timeout_seconds = timeout_seconds;
+    ESP_LOGI(TAG, "Watchdog timeout updated to %u seconds", timeout_seconds);
 }
 

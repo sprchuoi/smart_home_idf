@@ -6,6 +6,7 @@
 #include "AudioPipeline.h"
 #include "error/ErrorHandler.h"
 #include <cstring>
+#include "core/watchdog/WatchdogSupervisor.h"
 
 const char* AudioPipeline::TAG = "AudioPipeline";
 
@@ -37,10 +38,14 @@ bool AudioPipeline::initialize(uint32_t sample_rate,
     m_sample_rate = sample_rate;
     m_bits_per_sample = bits_per_sample;
     
+    // Log available heap memory before creating the ring buffer
+    ESP_LOGI(TAG, "Available heap memory: %u bytes", esp_get_free_heap_size());
+    configASSERT(m_ring_buffer);
     // Create ring buffer
+    // Validate ring buffer creation
     m_ring_buffer = xRingbufferCreate(RING_BUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
     if (m_ring_buffer == nullptr) {
-        ESP_LOGE(TAG, "Failed to create ring buffer");
+        ESP_LOGE(TAG, "Failed to create ring buffer. Check heap memory and buffer size.");
         return false;
     }
     
@@ -116,6 +121,11 @@ bool AudioPipeline::initialize(uint32_t sample_rate,
         vRingbufferDelete(m_ring_buffer);
         m_ring_buffer = nullptr;
         return false;
+    }
+    
+    // Adjust watchdog timeout to handle potential delays
+    if (WatchdogSupervisor::getInstance()) {
+        WatchdogSupervisor::getInstance()->setWatchdogTimeout(60); // Set to 60 seconds
     }
     
     m_initialized = true;
@@ -232,6 +242,9 @@ void AudioPipeline::taskLoop()
 
     while (m_running) {
         if (m_suspended) {
+            if (WatchdogSupervisor::getInstance()) {
+                WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::AUDIO_PIPELINE);
+            }
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
@@ -248,6 +261,9 @@ void AudioPipeline::taskLoop()
         if (err == ESP_OK && bytes_read > 0) {
             if (xRingbufferSend(m_ring_buffer, dma_buffer, bytes_read, 0) != pdTRUE) {
                 ESP_LOGW(TAG, "Ring buffer full, dropping audio data");
+            }
+            if (WatchdogSupervisor::getInstance()) {
+                WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::AUDIO_PIPELINE);
             }
         } else if (err != ESP_OK) {
             ESP_LOGE(TAG, "I2S read error: %s", esp_err_to_name(err));

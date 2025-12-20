@@ -265,6 +265,7 @@ void OledDisplay::writeData(uint8_t* data, size_t len) {
     memcpy(buffer + 1, data, len);
     i2c_master_transmit(m_i2c_dev, buffer, len + 1, -1);
     delete[] buffer;
+    vTaskDelete(nullptr);  // REQUIRED
 }
 
 void OledDisplay::initDisplay() {

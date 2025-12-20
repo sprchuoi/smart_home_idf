@@ -5,6 +5,7 @@
 
 #include "WakeWordService.h"
 #include "error/ErrorHandler.h"
+#include "core/watchdog/WatchdogSupervisor.h"
 
 const char* WakeWordService::TAG = "WakeWordService";
 
@@ -32,8 +33,16 @@ bool WakeWordService::initialize(AudioPipeline* audio_pipeline) {
     m_audio_pipeline = audio_pipeline;
     
     // Initialize ESP-SR (stub - uncomment when ESP-SR is available)
+    // Handle ESP-SR initialization failure gracefully
     if (!initializeESP_SR()) {
-        ESP_LOGW(TAG, "ESP-SR initialization failed, using stub mode");
+        ESP_LOGW(TAG, "ESP-SR initialization failed. Disabling wake word detection.");
+        m_running = false; // Prevent task from running in an inconsistent state
+        return false;
+    }
+    
+    // Adjust watchdog timeout to handle potential delays
+    if (WatchdogSupervisor::getInstance()) {
+        WatchdogSupervisor::getInstance()->setWatchdogTimeout(60); // Set to 60 seconds
     }
     
     // Create task on Core 1
@@ -71,9 +80,14 @@ bool WakeWordService::start() {
 void WakeWordService::stop() {
     m_running = false;
     
+    // Ensure resources are cleaned up properly
     if (m_task_handle != nullptr) {
         vTaskDelete(m_task_handle);
         m_task_handle = nullptr;
+    }
+
+    if (m_audio_pipeline != nullptr) {
+        ESP_LOGW(TAG, "AudioPipeline dependency detected during cleanup. Ensure it is stopped.");
     }
     
     m_initialized = false;
@@ -85,8 +99,13 @@ void WakeWordService::taskLoop() {
     uint8_t* audio_buffer = new uint8_t[AUDIO_BUFFER_SIZE];
     
     while (m_running) {
+        // Check if m_audio_pipeline is valid before proceeding
         if (m_audio_pipeline == nullptr || !m_audio_pipeline->isRunning()) {
-            vTaskDelay(pdMS_TO_TICKS(100));
+            ESP_LOGW(TAG, "AudioPipeline not ready. Waiting...");
+            if (WatchdogSupervisor::getInstance()) {
+                WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::WAKE_WORD_SERVICE);
+            }
+            vTaskDelay(pdMS_TO_TICKS(50)); // Shorter delay to avoid blocking
             continue;
         }
         
@@ -96,6 +115,9 @@ void WakeWordService::taskLoop() {
         if (bytes_read > 0) {
             // Process audio data with ESP-SR WakeNet
             processAudioData(audio_buffer, bytes_read);
+            if (WatchdogSupervisor::getInstance()) {
+                WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::WAKE_WORD_SERVICE);
+            }
         }
     }
     
@@ -105,6 +127,12 @@ void WakeWordService::taskLoop() {
 }
 
 void WakeWordService::processAudioData(const uint8_t* audio_data, size_t data_len) {
+    // Ensure m_audio_pipeline is valid before processing audio data
+    if (m_audio_pipeline == nullptr) {
+        ESP_LOGE(TAG, "AudioPipeline is null during audio processing");
+        return;
+    }
+
     // ESP-SR WakeNet processing (stub implementation)
     // In real implementation:
     // 1. Convert audio data to format expected by WakeNet

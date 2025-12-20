@@ -17,7 +17,8 @@ const char* Application::TAG = "Application";
 
 Application::Application()
     : m_initialized(false)
-    , m_running(false) {
+    , m_running(false) 
+    { // Initialize pointer to nullptr
 }
 
 Application::~Application() {
@@ -137,9 +138,10 @@ bool Application::initialize() {
     }
     
     // Initialize Wake Word Service (with AudioPipeline)
-    if (!m_wake_word_service.initialize(&m_audio_pipeline)) {
-        ESP_LOGW(TAG, "Failed to initialize WakeWordService (continuing anyway)");
-    }
+    // if (!m_wake_word_service.initialize(&m_audio_pipeline)) {
+    //     ESP_LOGW(TAG, "Failed to initialize WakeWordService. Disabling service.");
+    //     return false;
+    // }
     
     // Initialize OTA Service
     if (!m_ota_service.initialize()) {
@@ -186,7 +188,7 @@ bool Application::start() {
     m_audio_pipeline.start();
     
     // Start wake word service
-    m_wake_word_service.start();
+    // m_wake_word_service.start();
     
     // Start UART driver
     m_uart_driver.start();
@@ -196,13 +198,13 @@ bool Application::start() {
     TaskHandle_t mqtt_handle = m_mqtt_service.getTaskHandle();
     TaskHandle_t state_handle = m_state_machine.getTaskHandle();
     TaskHandle_t audio_handle = m_audio_pipeline.getTaskHandle();
-    TaskHandle_t wake_handle = m_wake_word_service.getTaskHandle();
+    // TaskHandle_t wake_handle = m_wake_word_service.getTaskHandle();
     
     if (wifi_handle) m_watchdog.registerTask(WatchdogTask::WIFI_SERVICE, wifi_handle);
     if (mqtt_handle) m_watchdog.registerTask(WatchdogTask::MQTT_SERVICE, mqtt_handle);
     if (state_handle) m_watchdog.registerTask(WatchdogTask::APP_STATE_MACHINE, state_handle);
     if (audio_handle) m_watchdog.registerTask(WatchdogTask::AUDIO_PIPELINE, audio_handle);
-    if (wake_handle) m_watchdog.registerTask(WatchdogTask::WAKE_WORD_SERVICE, wake_handle);
+    // if (wake_handle) m_watchdog.registerTask(WatchdogTask::WAKE_WORD_SERVICE, wake_handle);
     
     // Publish Home Assistant discovery
     if (m_mqtt_service.isConnected()) {
@@ -249,7 +251,7 @@ void Application::stop() {
     
     m_running = false;
     
-    m_wake_word_service.stop();
+    // m_wake_word_service.stop();
     m_audio_pipeline.stop();
     m_ota_service.stop();
     m_uart_driver.stop();

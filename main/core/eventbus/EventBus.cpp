@@ -76,18 +76,26 @@ void EventBus::processEvents() {
         ESP_LOGE(TAG, "EventBus not initialized");
         return;
     }
-    
+
     EventMessage event;
-    if (xQueueReceive(m_queue, &event, portMAX_DELAY) == pdTRUE) {
-        // Notify all subscribers
+    // Use a short timeout so that callers don't block forever and tasks can feed watchdog
+    if (xQueueReceive(m_queue, &event, pdMS_TO_TICKS(50)) == pdTRUE) {
+        // Collect callbacks under mutex, then invoke outside mutex to avoid deadlocks
+        std::vector<EventCallback> callbacks;
         if (xSemaphoreTake(m_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
             for (const auto& sub : m_subscriptions) {
                 if (sub.type == event.type || sub.type == EventType::SYSTEM_ERROR) {
-                    ESP_LOGE(TAG, "Exception in event callback");
-                    sub.callback(event);
+                    if (sub.callback) callbacks.push_back(sub.callback);
                 }
             }
             xSemaphoreGive(m_mutex);
+        }
+
+        for (const auto &cb : callbacks) {
+            // Callbacks must be quick; they run in the context of the caller
+            if (cb) {
+                cb(event);
+            }
         }
     }
 }
