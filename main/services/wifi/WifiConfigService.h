@@ -13,7 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
-
+#include "cfg/Wifi_cfg.hpp"
 /**
  * @brief WiFi Configuration Service
  * 
@@ -63,7 +63,7 @@ public:
      * @brief Check if credentials are configured
      * @return true if both SSID and password exist
      */
-    bool hasCredentials();
+    bool hasCredentials(WifiConfigInfo_st *m_wifi_cfg);
     
     /**
      * @brief Deinitialize
@@ -79,6 +79,11 @@ private:
     nvs_handle_t m_nvs_handle;
     SemaphoreHandle_t m_mutex;
     bool m_initialized;
+
+    WifiConfigInfo_st m_wifi_cfg = {
+        .ssid = CONFIG_WIFI_SSID,
+        .password = CONFIG_WIFI_PASSWORD
+    };
     
     static const char* TAG;
     static const char* NVS_NAMESPACE;

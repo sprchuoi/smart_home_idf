@@ -17,8 +17,8 @@
 #include "freertos/task.h"
 #include <string>
 
-#define WIFI_SSID_MAX_LEN     32
-#define WIFI_PASS_MAX_LEN     64
+
+
 
 /**
  * @brief WiFi Service
@@ -33,9 +33,10 @@ public:
     
     /**
      * @brief Initialize and start WiFi service
+     * @param g_wifi_cfg WiFi configuration information
      * @return true on success
      */
-    bool initialize();
+    bool initialize(WifiConfigInfo_st *g_wifi_cfg);
     
     /**
      * @brief Start WiFi connection
@@ -97,15 +98,12 @@ private:
     static constexpr int TASK_STACK_SIZE = 4096;
     static constexpr int TASK_PRIORITY = 5;
     static constexpr BaseType_t TASK_CORE = 0;  // Core 0
-    typedef struct {
-        char ssid[WIFI_SSID_MAX_LEN];
-        char password[WIFI_PASS_MAX_LEN];
-    } WifiConfigInfo_st; 
 
-    WifiConfigInfo_st g_wifi_cfg = {
-        .ssid = CONFIG_WIFI_SSID,
-        .password = CONFIG_WIFI_PASSWORD
-    };
+    WifiConfigInfo_st m_wifi_cfg;
+
+    esp_event_handler_instance_t m_wifi_event_inst;
+    esp_event_handler_instance_t m_ip_event_inst;
+
 
 };
 

@@ -54,6 +54,13 @@ public:
     bool hasCredentials();
     
     /**
+     * @brief Check if credentials are configured (overload)
+     * @param wifi_cfg Pointer to WifiConfigInfo_st structure
+     * @return true if credentials exist
+     */
+    bool hasCredentials(WifiConfigInfo_st* wifi_cfg);
+    
+    /**
      * @brief Clear stored credentials
      * @return true on success
      */

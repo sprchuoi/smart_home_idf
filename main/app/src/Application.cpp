@@ -59,19 +59,18 @@ bool Application::initialize() {
         return false;
     }
     
-    // Initialize WiFi Config Service
+     // Initialize WiFi Config Service
     if (!WifiConfigService::getInstance().initialize()) {
         ESP_LOGE(TAG, "Failed to initialize WifiConfigService");
         return false;
     }
-    
     // Initialize WiFi Provisioning
     if (!WifiProvisioning::getInstance().initialize()) {
         ESP_LOGW(TAG, "Failed to initialize WifiProvisioning (continuing anyway)");
     }
-    
+
     // Check if WiFi credentials are configured
-    if (!WifiProvisioning::getInstance().hasCredentials()) {
+    if (!WifiProvisioning::getInstance().hasCredentials(&g_wifi_cfg)) {
         ESP_LOGW(TAG, "WiFi credentials not configured!");
         ESP_LOGW(TAG, "Use console commands to configure:");
         ESP_LOGW(TAG, "  wifi_set <ssid> <password>");
@@ -81,16 +80,21 @@ bool Application::initialize() {
         // WifiProvisioning::getInstance().setDefaultCredentials("YourSSID", "YourPassword");
     } else {
         ESP_LOGI(TAG, "WiFi credentials configured");
+        // Initialize WiFi Service
+        if (!m_wifi_service.initialize(&g_wifi_cfg)) {
+            ESP_LOGE(TAG, "Failed to initialize WifiService");
+            return false;
+        }
     }
+     
+    // // Initialize Error Handler
+    // // (Singleton, no explicit init needed)
     
-    // Initialize Error Handler
-    // (Singleton, no explicit init needed)
-    
-    // Initialize State Machine
-    if (!m_state_machine.initialize()) {
-        ESP_LOGE(TAG, "Failed to initialize AppStateMachine");
-        return false;
-    }
+    // // Initialize State Machine
+    // if (!m_state_machine.initialize()) {
+    //     ESP_LOGE(TAG, "Failed to initialize AppStateMachine");
+    //     return false;
+    // }
     
     // Initialize Display (disabled - hardware may not be connected)
     // Uncomment when OLED display is connected to I2C pins (SDA: GPIO21, SCL: GPIO22)
@@ -98,55 +102,51 @@ bool Application::initialize() {
     //     ESP_LOGW(TAG, "Failed to initialize OLED display (continuing anyway)");
     // }
     
-    // Initialize WiFi Service
-    if (!m_wifi_service.initialize()) {
-        ESP_LOGE(TAG, "Failed to initialize WifiService");
-        return false;
-    }
+    
     
     // Initialize MQTT Service
     // TODO: Configure MQTT broker URI and client ID
-    const char* mqtt_broker = "mqtt://192.168.1.100:1883";  // Change to your broker
-    const char* mqtt_client_id = "esp32_smart_home";
+    // const char* mqtt_broker = "mqtt://192.168.1.100:1883";  // Change to your broker
+    // const char* mqtt_client_id = "esp32_smart_home";
     
-    if (!m_mqtt_service.initialize(mqtt_broker, mqtt_client_id)) {
-        ESP_LOGE(TAG, "Failed to initialize MqttService");
-        return false;
-    }
-    
-    // Initialize Watchdog Supervisor
-    if (!m_watchdog.initialize(wdt_config)) {  // 30 second timeout
-        ESP_LOGE(TAG, "Failed to initialize WatchdogSupervisor");
-        return false;
-    }
-    
-    // Initialize Power Manager
-    if (!m_power_manager.initialize()) {
-        ESP_LOGE(TAG, "Failed to initialize PowerManager");
-        return false;
-    }
-    
-    // Initialize Audio State Machine
-    if (!m_audio_state_machine.initialize()) {
-        ESP_LOGE(TAG, "Failed to initialize AudioStateMachine");
-        return false;
-    }
-    
-    // Initialize Audio Pipeline
-    if (!m_audio_pipeline.initialize(16000, 16, I2S_NUM_0, GPIO_NUM_4, GPIO_NUM_5, GPIO_NUM_18)) {
-        ESP_LOGW(TAG, "Failed to initialize AudioPipeline (continuing anyway)");
-    }
-    
-    // Initialize Wake Word Service (with AudioPipeline)
-    // if (!m_wake_word_service.initialize(&m_audio_pipeline)) {
-    //     ESP_LOGW(TAG, "Failed to initialize WakeWordService. Disabling service.");
+    // if (!m_mqtt_service.initialize(mqtt_broker, mqtt_client_id)) {
+    //     ESP_LOGE(TAG, "Failed to initialize MqttService");
     //     return false;
     // }
     
-    // Initialize OTA Service
-    if (!m_ota_service.initialize()) {
-        ESP_LOGW(TAG, "Failed to initialize OTAService (continuing anyway)");
-    }
+    // // Initialize Watchdog Supervisor
+    // if (!m_watchdog.initialize(wdt_config)) {  // 30 second timeout
+    //     ESP_LOGE(TAG, "Failed to initialize WatchdogSupervisor");
+    //     return false;
+    // }
+    
+    // // Initialize Power Manager
+    // if (!m_power_manager.initialize()) {
+    //     ESP_LOGE(TAG, "Failed to initialize PowerManager");
+    //     return false;
+    // }
+    
+    // // Initialize Audio State Machine
+    // if (!m_audio_state_machine.initialize()) {
+    //     ESP_LOGE(TAG, "Failed to initialize AudioStateMachine");
+    //     return false;
+    // }
+    
+    // // Initialize Audio Pipeline
+    // // if (!m_audio_pipeline.initialize(16000, 16, I2S_NUM_0, GPIO_NUM_4, GPIO_NUM_5, GPIO_NUM_18)) {
+    // //     ESP_LOGW(TAG, "Failed to initialize AudioPipeline (continuing anyway)");
+    // // }
+    
+    // // Initialize Wake Word Service (with AudioPipeline)
+    // // if (!m_wake_word_service.initialize(&m_audio_pipeline)) {
+    // //     ESP_LOGW(TAG, "Failed to initialize WakeWordService. Disabling service.");
+    // //     return false;
+    // // }
+    
+    // // Initialize OTA Service
+    // if (!m_ota_service.initialize()) {
+    //     ESP_LOGW(TAG, "Failed to initialize OTAService (continuing anyway)");
+    // }
     
     // Note: UART Driver not initialized - ESP Console already uses UART0
     // If you need separate UART communication, configure UartDriver for UART1 or UART2
@@ -173,19 +173,8 @@ bool Application::start() {
     
     ESP_LOGI(TAG, "Starting application...");
     
-    // Start WiFi connection (only if credentials are configured)
-    if (WifiProvisioning::getInstance().hasCredentials()) {
-        if (!m_wifi_service.connect()) {
-            ESP_LOGE(TAG, "Failed to start WiFi connection");
-            return false;
-        }
-    } else {
-        ESP_LOGW(TAG, "Skipping WiFi connection - credentials not configured");
-        ESP_LOGW(TAG, "Use console command: wifi_set <ssid> <password>");
-    }
-    
     // Start audio pipeline
-    m_audio_pipeline.start();
+    // m_audio_pipeline.start();
     
     // Start wake word service
     // m_wake_word_service.start();
@@ -197,13 +186,13 @@ bool Application::start() {
     TaskHandle_t wifi_handle = m_wifi_service.getTaskHandle();
     TaskHandle_t mqtt_handle = m_mqtt_service.getTaskHandle();
     TaskHandle_t state_handle = m_state_machine.getTaskHandle();
-    TaskHandle_t audio_handle = m_audio_pipeline.getTaskHandle();
+    // TaskHandle_t audio_handle = m_audio_pipeline.getTaskHandle();
     // TaskHandle_t wake_handle = m_wake_word_service.getTaskHandle();
     
     if (wifi_handle) m_watchdog.registerTask(WatchdogTask::WIFI_SERVICE, wifi_handle);
     if (mqtt_handle) m_watchdog.registerTask(WatchdogTask::MQTT_SERVICE, mqtt_handle);
     if (state_handle) m_watchdog.registerTask(WatchdogTask::APP_STATE_MACHINE, state_handle);
-    if (audio_handle) m_watchdog.registerTask(WatchdogTask::AUDIO_PIPELINE, audio_handle);
+    // if (audio_handle) m_watchdog.registerTask(WatchdogTask::AUDIO_PIPELINE, audio_handle);
     // if (wake_handle) m_watchdog.registerTask(WatchdogTask::WAKE_WORD_SERVICE, wake_handle);
     
     // Publish Home Assistant discovery
@@ -252,7 +241,7 @@ void Application::stop() {
     m_running = false;
     
     // m_wake_word_service.stop();
-    m_audio_pipeline.stop();
+    // m_audio_pipeline.stop();
     m_ota_service.stop();
     m_uart_driver.stop();
     m_mqtt_service.stop();

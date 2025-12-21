@@ -78,6 +78,13 @@ private:
     bool m_initialized;
     bool m_running;
     
+    WifiConfigInfo_st g_wifi_cfg = {
+        .ssid = CONFIG_WIFI_SSID,
+        .password = CONFIG_WIFI_PASSWORD
+    };
+
+
+    
     static const char* TAG;
 };
 

@@ -7,9 +7,9 @@
 #include "error/ErrorHandler.h"
 #include <cstring>
 #include "core/watchdog/WatchdogSupervisor.h"
+#include <mutex>
 
 const char* WifiService::TAG = "WifiService";
-
 
 
 WifiService::WifiService()
@@ -17,7 +17,7 @@ WifiService::WifiService()
     , m_netif(nullptr)
     , m_initialized(false)
     , m_connected(false)
-    , m_should_reconnect(true)
+    , m_should_reconnect(false)
     , m_reconnect_attempts(0) {
 }
 
@@ -25,10 +25,11 @@ WifiService::~WifiService() {
     stop();
 }
 
-bool WifiService::initialize() {
+bool WifiService::initialize(WifiConfigInfo_st *m_wifi_cfg) {
     if (m_initialized) {
         return true;
     }
+    esp_err_t err = ESP_OK;
     // esp-netif
     ESP_ERROR_CHECK(esp_netif_init());
     //  Event loop
@@ -41,20 +42,12 @@ bool WifiService::initialize() {
     }
     assert(m_netif);
     
-    // Initialize WiFi with default config
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_err_t err = esp_wifi_init(&cfg);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
-        return false;
-    }
-    
     // Register event handlers
     err = esp_event_handler_instance_register(WIFI_EVENT,
                                              ESP_EVENT_ANY_ID,
                                              &onWifiEvent,
                                              this,
-                                             nullptr);
+                                              &m_wifi_event_inst);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register WiFi event handler: %s", esp_err_to_name(err));
         return false;
@@ -64,10 +57,23 @@ bool WifiService::initialize() {
                                              IP_EVENT_STA_GOT_IP,
                                              &onWifiEvent,
                                              this,
-                                             nullptr);
+                                             &m_ip_event_inst);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register IP event handler: %s", esp_err_to_name(err));
         return false;
+    }
+    
+
+    // Initialize WiFi with default config
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    err = esp_wifi_init(&cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize WiFi: %s", esp_err_to_name(err));
+        return false;
+    }
+    else{
+        m_initialized = true;
+        connect(); // Attempt to connect immediately
     }
     
     // Set WiFi mode to STA
@@ -93,7 +99,7 @@ bool WifiService::initialize() {
         return false;
     }
     
-    m_initialized = true;
+    
     ESP_LOGI(TAG, "WifiService initialized (Core %d)", TASK_CORE);
     return true;
 }
@@ -103,47 +109,16 @@ bool WifiService::connect() {
         ESP_LOGE(TAG, "WifiService not initialized");
         return false;
     }
-    
-    // Check if credentials are configured
-    if (!WifiConfigService::getInstance().hasCredentials()) {
-        ESP_LOGE(TAG, "WiFi credentials not configured!");
-        ESP_LOGE(TAG, "Use console command: wifi_set <ssid> <password>");
-        ErrorHandler::getInstance().reportError(
-            ErrorCategory::WIFI_ERROR,
-            ESP_ERR_NOT_FOUND,
-            "WiFi credentials not configured"
-        );
-        return false;
-    }
-    
-    // Get credentials from config service
-    
-    if (!WifiConfigService::getInstance().getSSID(g_wifi_cfg.ssid, sizeof(g_wifi_cfg.ssid))) {
-        ESP_LOGE(TAG, "SSID not configured");
-        ErrorHandler::getInstance().reportError(
-            ErrorCategory::WIFI_ERROR,
-            ESP_ERR_NOT_FOUND,
-            "WiFi SSID not configured"
-        );
-        return false;
-    }
-    
-    if (!WifiConfigService::getInstance().getPassword(g_wifi_cfg.password, sizeof(g_wifi_cfg.password))) {
-        ESP_LOGE(TAG, "Password not configured");
-        ErrorHandler::getInstance().reportError(
-            ErrorCategory::WIFI_ERROR,
-            ESP_ERR_NOT_FOUND,
-            "WiFi password not configured"
-        );
-        return false;
-    }
-    
     // Configure WiFi
     wifi_config_t wifi_config = {};
-    strncpy((char*)wifi_config.sta.ssid, g_wifi_cfg.ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char*)wifi_config.sta.password, g_wifi_cfg.password, sizeof(wifi_config.sta.password) - 1);
+    strncpy((char*)wifi_config.sta.ssid, m_wifi_cfg.ssid, sizeof(wifi_config.sta.ssid) - 1);
+    wifi_config.sta.ssid[sizeof(wifi_config.sta.ssid) - 1] = '\0';
+
+    strncpy((char*)wifi_config.sta.password, m_wifi_cfg.password, sizeof(wifi_config.sta.password) - 1);
+    wifi_config.sta.password[sizeof(wifi_config.sta.password) - 1] = '\0';
+
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    
+
     esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set WiFi config: %s", esp_err_to_name(err));
@@ -154,7 +129,7 @@ bool WifiService::connect() {
         );
         return false;
     }
-    
+
     // Start WiFi
     err = esp_wifi_start();
     if (err != ESP_OK) {
@@ -166,7 +141,7 @@ bool WifiService::connect() {
         );
         return false;
     }
-    
+
     publishEvent(EventType::WIFI_STARTED);
     
     // Begin connection
@@ -180,10 +155,10 @@ bool WifiService::connect() {
         );
         return false;
     }
-    
+
     m_should_reconnect = true;
     m_reconnect_attempts = 0;
-    ESP_LOGI(TAG, "WiFi connection initiated to: %s", g_wifi_cfg.ssid);
+    ESP_LOGI(TAG, "WiFi connection initiated to: %s", m_wifi_cfg.ssid);
     return true;
 }
 
@@ -227,7 +202,7 @@ std::string WifiService::getIPAddress() const {
 void WifiService::taskLoop() {
     ESP_LOGI(TAG, "WiFi task started on Core %d", xPortGetCoreID());
     
-    while (true) {
+    while (true) {  
         // Task handles reconnection logic
         if (m_should_reconnect && !m_connected && m_initialized) {
             if (m_reconnect_attempts < 10) {
@@ -236,18 +211,19 @@ void WifiService::taskLoop() {
                     WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::WIFI_SERVICE);
                 }
                 vTaskDelay(pdMS_TO_TICKS(5000));  // Wait 5 seconds
-                ESP_LOGI(TAG, "Attempting WiFi reconnection (attempt %lu)", m_reconnect_attempts + 1);
-                esp_wifi_connect();
+                ESP_LOGW(TAG, "Attempting WiFi reconnection (attempt %lu)", m_reconnect_attempts + 1);
                 m_reconnect_attempts++;
             } else {
                 ESP_LOGW(TAG, "Max reconnection attempts reached");
+                ESP_LOGW(TAG, "Please Reset device or reconfigure WiFi credentials");
                 m_should_reconnect = false;
             }
         }
-        
-        // Always feed watchdog at least once per loop and yield
-        if (WatchdogSupervisor::getInstance()) {
-            WatchdogSupervisor::getInstance()->feedWatchdog(WatchdogTask::WIFI_SERVICE);
+        else {
+            // If connected, reset reconnect attempts
+            if (m_connected) {
+                m_reconnect_attempts = 0;
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));  // Check every second
     }
@@ -265,13 +241,14 @@ void WifiService::onWifiEvent(void* arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
             case WIFI_EVENT_STA_START:
-                ESP_LOGI(TAG, "WiFi STA started");
+                ESP_LOGD(TAG, "WiFi STA started");
+                esp_wifi_connect();
                 service->publishEvent(EventType::WIFI_STARTED);
                 break;
                 
             case WIFI_EVENT_STA_CONNECTED: {
                 wifi_event_sta_connected_t* event = (wifi_event_sta_connected_t*)event_data;
-                ESP_LOGI(TAG, "WiFi connected to: %s", event->ssid);
+                ESP_LOGD(TAG, "WiFi connected to: %s", event->ssid);
                 service->m_connected = true;
                 service->m_reconnect_attempts = 0;
                 service->publishEvent(EventType::WIFI_CONNECTED);
@@ -283,7 +260,7 @@ void WifiService::onWifiEvent(void* arg, esp_event_base_t event_base,
                 ESP_LOGW(TAG, "WiFi disconnected (reason: %d)", event->reason);
                 service->m_connected = false;
                 service->publishEvent(EventType::WIFI_DISCONNECTED);
-                
+                esp_wifi_connect(); 
                 // Trigger reconnection in task loop
                 break;
             }

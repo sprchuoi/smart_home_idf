@@ -66,10 +66,6 @@ bool WifiConfigService::getSSID(char* ssid, size_t max_len) {
 }
 
 bool WifiConfigService::getPassword(char* password, size_t max_len) {
-    if (!m_initialized || password == nullptr || max_len == 0) {
-        return false;
-    }
-    
     if (xSemaphoreTake(m_mutex, portMAX_DELAY) != pdTRUE) {
         return false;
     }
@@ -140,15 +136,11 @@ bool WifiConfigService::setPassword(const char* password) {
     return true;
 }
 
-bool WifiConfigService::hasCredentials() {
+bool WifiConfigService::hasCredentials(WifiConfigInfo_st *m_wifi_cfg) {
     if (!m_initialized) {
         return false;
     }
-    
-    char ssid[33] = {0};
-    char password[65] = {0};
-    
-    return getSSID(ssid, sizeof(ssid)) && getPassword(password, sizeof(password));
+    return getSSID(m_wifi_cfg->ssid, sizeof(m_wifi_cfg->ssid)) && getPassword(m_wifi_cfg->password, sizeof(m_wifi_cfg->password));
 }
 
 void WifiConfigService::deinitialize() {

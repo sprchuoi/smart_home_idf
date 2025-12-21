@@ -111,7 +111,12 @@ bool WifiProvisioning::setCredentials(const char* ssid, const char* password) {
 }
 
 bool WifiProvisioning::hasCredentials() {
-    return WifiConfigService::getInstance().hasCredentials();
+    WifiConfigInfo_st wifi_cfg;
+    return WifiConfigService::getInstance().hasCredentials(&wifi_cfg);
+}
+
+bool WifiProvisioning::hasCredentials(WifiConfigInfo_st* wifi_cfg) {
+    return WifiConfigService::getInstance().hasCredentials(wifi_cfg);
 }
 
 bool WifiProvisioning::clearCredentials() {

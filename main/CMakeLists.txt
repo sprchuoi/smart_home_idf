@@ -8,6 +8,7 @@ idf_component_register(
         "core/audio/AudioStateMachine.cpp"
         "core/powermanager/PowerManager.cpp"
         "core/watchdog/WatchdogSupervisor.cpp"
+        "services/wifi/cfg/Wifi_cfg.hpp"
         "services/wifi/WifiService.cpp"
         "services/wifi/WifiConfigService.cpp"
         "services/wifi/WifiProvisioning.cpp"

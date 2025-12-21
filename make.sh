@@ -17,6 +17,7 @@
 #   doc         - Generate documentation
 #   ci          - Run CI/CD pipeline
 #   help        - Show this help message
+#   debug       - Start a debug session
 ###############################################################################
 
 set -e  # Exit on error
@@ -555,6 +556,7 @@ Commands:
   doc            Generate documentation
   ci             Run CI/CD pipeline
   help           Show this help message
+  debug          Start a debug session
 
 Environment Variables:
   IDF_PATH       ESP-IDF installation path (default: ~/esp/esp-idf)
@@ -603,6 +605,14 @@ main() {
             ;;
         ci|ci-cd)
             run_ci
+            ;;
+        debug)
+            print_info "Starting debug session..."
+            if [ -f "$PROJECT_DIR/debug.sh" ]; then
+                bash "$PROJECT_DIR/debug.sh"
+            else
+                print_error "Debug script not found. Ensure debug.sh exists in the project directory."
+            fi
             ;;
         help|--help|-h)
             show_help
