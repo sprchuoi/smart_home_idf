@@ -59,18 +59,14 @@ bool Application::initialize() {
         return false;
     }
     
-     // Initialize WiFi Config Service
-    if (!WifiConfigService::getInstance().initialize()) {
-        ESP_LOGE(TAG, "Failed to initialize WifiConfigService");
+    // Initialize WiFi Config Interface (combines config and provisioning)
+    if (!WifiConfigInterface::getInstance().initialize()) {
+        ESP_LOGE(TAG, "Failed to initialize WifiConfigInterface");
         return false;
-    }
-    // Initialize WiFi Provisioning
-    if (!WifiProvisioning::getInstance().initialize()) {
-        ESP_LOGW(TAG, "Failed to initialize WifiProvisioning (continuing anyway)");
     }
 
     // Check if WiFi credentials are configured
-    if (!WifiProvisioning::getInstance().hasCredentials(&g_wifi_cfg)) {
+    if (!WifiConfigInterface::getInstance().hasCredentials(&g_wifi_cfg)) {
         ESP_LOGW(TAG, "WiFi credentials not configured!");
         ESP_LOGW(TAG, "Use console commands to configure:");
         ESP_LOGW(TAG, "  wifi_set <ssid> <password>");
@@ -252,7 +248,7 @@ void Application::stop() {
     m_power_manager.stop();
     m_watchdog.stop();
     
-    WifiConfigService::getInstance().deinitialize();
+    WifiConfigInterface::getInstance().deinitialize();
     EventBus::getInstance().deinitialize();
     
     ESP_LOGI(TAG, "Application stopped");
