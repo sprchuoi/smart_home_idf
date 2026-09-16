@@ -68,14 +68,13 @@ private:
     
     bool m_initialized;
     bool m_running;
-    
-    WifiConfigInfo_st g_wifi_cfg = {
-        .ssid = CONFIG_WIFI_SSID,
-        .password = CONFIG_WIFI_PASSWORD
-    };
 
+    // Populated at runtime from NVS by WifiConfigInterface::hasCredentials().
+    // Deliberately not seeded from build-time config: credentials compiled into
+    // the image are plaintext, are shared by every device flashed from the same
+    // build, and end up in git.
+    WifiConfigInfo_st m_wifi_cfg = {};
 
-    
     static const char* TAG;
 };
 

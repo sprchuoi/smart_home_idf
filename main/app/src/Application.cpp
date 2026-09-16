@@ -3,7 +3,7 @@
  * @brief Main Application implementation
  */
 
-#include "cfg/Application_cfg.hpp"
+#include "app/src/Application.h"
 
 #include <string>
 #include <cstring>
@@ -75,11 +75,11 @@ bool Application::initialize() {
     //     esp32> wifi_set <ssid> <password>
     // A device with no credentials boots to a usable console instead of
     // retrying forever.
-    if (!WifiConfigInterface::getInstance().hasCredentials(&g_wifi_cfg)) {
+    if (!WifiConfigInterface::getInstance().hasCredentials(&m_wifi_cfg)) {
         ESP_LOGW(TAG, "No WiFi credentials configured.");
         ESP_LOGW(TAG, "Provision over the console, then reboot:");
         ESP_LOGW(TAG, "  wifi_set <ssid> <password>");
-    } else if (!m_wifi_service.initialize(&g_wifi_cfg)) {
+    } else if (!m_wifi_service.initialize(&m_wifi_cfg)) {
         ESP_LOGE(TAG, "Failed to initialize WifiService");
         return false;
     } else if (!m_wifi_service.connect()) {

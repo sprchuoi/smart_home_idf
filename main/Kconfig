@@ -1,15 +1,14 @@
-menu "WiFi Configuration"
-
-config WIFI_SSID
-    string "WiFi SSID"
-    default ""
-    help
-        Default WiFi SSID
-
-config WIFI_PASSWORD
-    string "WiFi Password"
-    default ""
-    help
-        Default WiFi password
-
-endmenu
+# This file is intentionally empty of config symbols.
+#
+# It previously defined CONFIG_WIFI_SSID and CONFIG_WIFI_PASSWORD, which baked
+# WiFi credentials into the firmware image at build time. That is worth avoiding
+# for three reasons: the credentials are plaintext in the binary, every device
+# flashed from the same build shares them, and build-time secrets have a strong
+# pull toward ending up committed.
+#
+# WiFi is now provisioned at runtime over the serial console and stored in NVS:
+#
+#     esp32> wifi_set <ssid> <password>
+#
+# The file is kept (rather than removed) only so this rationale is discoverable
+# next to the component it belonged to.

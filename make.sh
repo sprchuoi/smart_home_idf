@@ -1,8 +1,8 @@
 #!/bin/bash
 
 ###############################################################################
-# ESP32 Smart Home - Build, Test, and CI/CD Script
-# 
+# ESP32-S3 Smart Home - Build, Test, and CI/CD Script
+#
 # Usage:
 #   ./make.sh [command] [options]
 #
@@ -10,10 +10,10 @@
 #   setup       - Setup development environment
 #   build       - Build the project
 #   clean       - Clean build artifacts
-#   flash       - Flash to ESP32 device
+#   flash       - Flash to the device
 #   monitor     - Monitor serial output
 #   test        - Run tests
-#   test-qemu   - Run tests on QEMU ESP32
+#   smoke       - Verify the built image (target, PSRAM, log level, OTA slots)
 #   doc         - Generate documentation
 #   ci          - Run CI/CD pipeline
 #   help        - Show this help message
@@ -35,15 +35,13 @@ PROJECT_DIR="$SCRIPT_DIR"
 BUILD_DIR="$PROJECT_DIR/build"
 DOCS_DIR="$PROJECT_DIR/docs"
 TEST_DIR="$PROJECT_DIR/tests"
-QEMU_DIR="$PROJECT_DIR/qemu"
-
 # ESP-IDF path (can be overridden)
 IDF_PATH="${IDF_PATH:-$HOME/esp/esp-idf}"
 
 # Configuration
-ESP32_TARGET="esp32"
-QEMU_IMAGE="${BUILD_DIR}/smart_home.bin"
-QEMU_TIMEOUT=60  # seconds
+# The build target is pinned in sdkconfig.defaults (CONFIG_IDF_TARGET=esp32s3),
+# which is what ESP-IDF actually reads. This mirrors it for the install hint.
+ESP32_TARGET="esp32s3"
 
 ###############################################################################
 # Helper Functions
@@ -141,8 +139,7 @@ setup_environment() {
     mkdir -p "$BUILD_DIR"
     mkdir -p "$DOCS_DIR"
     mkdir -p "$TEST_DIR"
-    mkdir -p "$QEMU_DIR"
-    
+
     print_success "Environment setup complete"
 }
 
@@ -156,7 +153,7 @@ install_esp_idf() {
     print_info "   git clone --recursive https://github.com/espressif/esp-idf.git"
     print_info "3. Install ESP-IDF:"
     print_info "   cd ~/esp/esp-idf"
-    print_info "   ./install.sh esp32"
+    print_info "   ./install.sh $ESP32_TARGET"
     print_info "4. Set IDF_PATH:"
     print_info "   export IDF_PATH=~/esp/esp-idf"
     exit 1
@@ -190,11 +187,10 @@ build_project() {
     
     if [ -f "$BUILD_DIR/smart_home.bin" ]; then
         print_success "Build successful: $BUILD_DIR/smart_home.bin"
-        
-        # Show build info
-        print_info "Build information:"
-        idf.py size-components
-        idf.py size-files
+        # A summary line, not the full per-component table. `idf.py
+        # size-components` and `size-files` dump hundreds of rows, which buries
+        # the result of whatever command the caller actually ran.
+        idf.py size 2>/dev/null | grep -E '^Total image size|^Used static|smallest' || true
     else
         print_error "Build failed - binary not found"
         return 1
@@ -313,6 +309,9 @@ run_static_analysis() {
     # Check for cppcheck
     if command -v cppcheck &> /dev/null; then
         print_info "Running cppcheck..."
+        # The report directory is only created by setup_environment, so a plain
+        # `./make.sh test` on a fresh clone would fail to redirect here.
+        mkdir -p "$TEST_DIR"
         cppcheck --enable=all --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
             "$PROJECT_DIR/main" \
@@ -327,94 +326,86 @@ run_static_analysis() {
 }
 
 ###############################################################################
-# QEMU Functions
+# Smoke Checks
+#
+# Replaces the old QEMU test, which could never pass: qemu-system-xtensa cannot
+# emulate an ESP32-S3, and the job additionally grepped for a log string that
+# CONFIG_LOG_MAXIMUM_LEVEL=WARN had compiled out of the binary. Every check
+# below fails loudly when something is actually wrong.
 ###############################################################################
 
-setup_qemu() {
-    print_info "Setting up QEMU ESP32..."
-    
-    # Check if QEMU is installed
-    if ! command -v qemu-system-xtensa &> /dev/null; then
-        print_info "Installing QEMU for ESP32..."
-        install_qemu_esp32
-    fi
-    
-    # Check for QEMU ESP32 image
-    if [ ! -f "$QEMU_DIR/esp32_qemu_image.bin" ]; then
-        print_info "Downloading QEMU ESP32 image..."
-        download_qemu_image
-    fi
-    
-    print_success "QEMU setup complete"
-}
+smoke_test() {
+    print_info "Running smoke checks on the built image..."
 
-install_qemu_esp32() {
-    print_info "QEMU ESP32 installation:"
-    print_info "1. Install QEMU:"
-    print_info "   sudo apt-get install qemu-system-xtensa"
-    print_info "2. Or build from source:"
-    print_info "   git clone https://github.com/espressif/qemu.git"
-    print_info "   cd qemu"
-    print_info "   ./configure --target-list=xtensa-softmmu"
-    print_info "   make"
-    print_warning "Please install QEMU manually"
-}
-
-download_qemu_image() {
-    print_info "Downloading QEMU ESP32 image..."
-    # This would download the QEMU image from Espressif
-    # For now, just create a placeholder
-    mkdir -p "$QEMU_DIR"
-    print_warning "QEMU image download not implemented - please download manually"
-}
-
-run_qemu_test() {
-    print_info "Running tests on QEMU ESP32..."
-    
-    # Check if QEMU is available
-    if ! command -v qemu-system-xtensa &> /dev/null; then
-        print_error "QEMU not found. Run './make.sh setup-qemu' first"
-        return 1
-    fi
-    
-    # Build project first
     if ! build_project; then
-        print_error "Build failed, cannot run QEMU test"
+        print_error "Build failed"
         return 1
     fi
-    
-    # Check if binary exists
-    if [ ! -f "$BUILD_DIR/smart_home.bin" ]; then
-        print_error "Binary not found: $BUILD_DIR/smart_home.bin"
-        return 1
-    fi
-    
-    print_info "Starting QEMU ESP32 emulation..."
-    
-    # Run QEMU with timeout
-    timeout "$QEMU_TIMEOUT" qemu-system-xtensa \
-        -nographic \
-        -machine esp32 \
-        -drive file="$BUILD_DIR/smart_home.bin",if=mtd,format=raw \
-        -global driver=timer.esp32.timg,property=wdt_disable,value=true \
-        2>&1 | tee "$QEMU_DIR/qemu_output.log" || {
-        
-        if [ $? -eq 124 ]; then
-            print_warning "QEMU test timed out after $QEMU_TIMEOUT seconds"
+
+    local failures=0
+
+    check_sdkconfig() {
+        local pattern="$1" ok_msg="$2" fail_msg="$3"
+        if grep -q "$pattern" "$PROJECT_DIR/sdkconfig"; then
+            print_success "$ok_msg"
         else
-            print_error "QEMU test failed"
-            return 1
+            print_error "$fail_msg"
+            failures=$((failures + 1))
         fi
     }
-    
-    # Analyze QEMU output
-    if grep -q "Application initialized successfully" "$QEMU_DIR/qemu_output.log"; then
-        print_success "QEMU test passed - Application initialized"
+
+    check_sdkconfig '^CONFIG_IDF_TARGET="esp32s3"' \
+        "Target is esp32s3" \
+        "Target is not esp32s3 - check sdkconfig.defaults"
+
+    check_sdkconfig '^CONFIG_ESPTOOLPY_FLASHSIZE="16MB"' \
+        "Flash size is 16MB" \
+        "Flash size is not 16MB"
+
+    check_sdkconfig '^CONFIG_SPIRAM_MODE_OCT=y' \
+        "PSRAM is octal mode" \
+        "PSRAM mode is not octal - the N16R8 will boot-loop"
+
+    check_sdkconfig '^CONFIG_LOG_MAXIMUM_LEVEL=3' \
+        "Log level INFO, so ESP_LOGI is compiled in" \
+        "Log level is above INFO - every ESP_LOGI is compiled out"
+
+    # Dual OTA slots must exist or esp_https_ota cannot work at all.
+    local parts
+    parts="$(python "$IDF_PATH/components/partition_table/gen_esp32part.py" \
+        "$BUILD_DIR/partition_table/partition-table.bin" 2>/dev/null || true)"
+    local want
+    for want in otadata ota_0 ota_1; do
+        if grep -q "^$want," <<<"$parts"; then
+            print_success "Partition present: $want"
+        else
+            print_error "Partition missing: $want - OTA cannot work"
+            failures=$((failures + 1))
+        fi
+    done
+
+    # idf.py build already enforces this, but spelling it out makes the
+    # failure legible instead of buried in check_sizes.py output.
+    if [ -f "$BUILD_DIR/smart_home.bin" ]; then
+        local size
+        size=$(stat -c %s "$BUILD_DIR/smart_home.bin")
+        if [ "$size" -lt $((0x400000)) ]; then
+            print_success "Image fits the 4M OTA slot ($(ls -lh "$BUILD_DIR/smart_home.bin" | awk '{print $5}'))"
+        else
+            print_error "Image is larger than the 4M OTA slot"
+            failures=$((failures + 1))
+        fi
     else
-        print_warning "QEMU test - Application may not have initialized correctly"
+        print_error "No image at $BUILD_DIR/smart_home.bin"
+        failures=$((failures + 1))
     fi
-    
-    print_success "QEMU test complete - see $QEMU_DIR/qemu_output.log"
+
+    if [ "$failures" -eq 0 ]; then
+        print_success "All smoke checks passed"
+        return 0
+    fi
+    print_error "$failures smoke check(s) failed"
+    return 1
 }
 
 ###############################################################################
@@ -487,16 +478,10 @@ run_ci() {
     print_info "CI Step 4/5: Running tests"
     run_tests || ci_status=1
     
-    # Step 5: QEMU test (if available)
-    if command -v qemu-system-xtensa &> /dev/null; then
-        print_info "CI Step 5/5: QEMU test"
-        run_qemu_test || {
-            print_warning "QEMU test failed (non-blocking)"
-        }
-    else
-        print_warning "QEMU not available, skipping QEMU test"
-    fi
-    
+    # Step 5: Smoke checks on the built image
+    print_info "CI Step 5/5: Smoke checks"
+    smoke_test || ci_status=1
+
     # Generate CI report
     generate_ci_report "$ci_status"
     
@@ -525,7 +510,7 @@ Binary: $([ -f "$BUILD_DIR/smart_home.bin" ] && echo "Present" || echo "Missing"
 Test Results:
 - Build: $([ $status -eq 0 ] && echo "PASS" || echo "FAIL")
 - Static Analysis: See $TEST_DIR/cppcheck_report.xml
-- QEMU Test: See $QEMU_DIR/qemu_output.log
+- Smoke checks: $([ $status -eq 0 ] && echo "PASS" || echo "FAIL")
 
 Documentation: $DOCS_DIR
 EOF
@@ -539,7 +524,7 @@ EOF
 
 show_help() {
     cat << EOF
-ESP32 Smart Home - Build Script
+ESP32-S3 Smart Home - Build Script
 
 Usage: ./make.sh [command] [options]
 
@@ -547,12 +532,11 @@ Commands:
   setup          Setup development environment
   build          Build the project
   clean          Clean build artifacts
-  flash          Flash to ESP32 device
+  flash          Flash to the device
   monitor        Monitor serial output
   flash-monitor  Flash and monitor
   test           Run tests
-  test-qemu      Run tests on QEMU ESP32
-  setup-qemu     Setup QEMU ESP32 environment
+  smoke          Verify the built image (target, PSRAM, log level, OTA slots)
   doc            Generate documentation
   ci             Run CI/CD pipeline
   help           Show this help message
@@ -565,6 +549,7 @@ Examples:
   ./make.sh setup
   ./make.sh build
   ./make.sh flash-monitor
+  ./make.sh smoke
   ./make.sh ci
 EOF
 }
@@ -594,11 +579,8 @@ main() {
         test)
             run_tests
             ;;
-        test-qemu|qemu)
-            run_qemu_test
-            ;;
-        setup-qemu)
-            setup_qemu
+        smoke|smoke-test)
+            smoke_test
             ;;
         doc|docs|documentation)
             generate_documentation
