@@ -101,9 +101,23 @@ No code. Confirm ground truth before trusting the partition layout.
 
 ### CI & tooling — DONE
 
+> **Correction:** the first CI rewrite still failed, with `idf.py: command not found`.
+> `espressif/esp-idf-ci-action` is a *container* action — it runs `docker run` and executes its
+> `command` input inside that image. `idf.py` exists only in there, so the build must go through
+> the action's `command` input; a plain `run: idf.py build` step runs on the runner host where
+> IDF is not installed. Also found while fixing it: **cppcheck is not on the `ubuntu-latest`
+> runner image** (checked against actions/runner-images), so that step would have failed next —
+> it now installs cppcheck explicitly. The fix is based on reading the action's source, not yet
+> confirmed by a green run.
+
 - [x] CI de-lied. The 9 `\\` continuations (and several `\"`) are gone; the YAML parses and the
       steps actually run. Static analysis uses `continue-on-error` instead of `|| true`, so
       findings are visible rather than swallowed.
+- [x] Build now goes through the container action's `command` input, which is the only place
+      `idf.py` exists.
+- [x] CI verifies the image itself (target, flash, PSRAM mode, log level, and the *generated*
+      partition table) rather than just reporting a size — same assertions as `./make.sh smoke`,
+      parsed from `partition-table.bin` so a bad CSV that still builds is caught.
 - [x] Target corrected to `esp32s3`; `IDF_VERSION` was self-contradictory (v5.2 in env vs v5.5
       in the action input) — now v5.5.1 throughout.
 - [x] QEMU job deleted, and removed from the `needs` of the report and release jobs. It could
