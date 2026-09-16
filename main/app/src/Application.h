@@ -71,6 +71,10 @@ private:
     bool m_initialized = false;
     bool m_running = false;
 
+    /// Counts telemetry cycles, so the status document can be refreshed
+    /// periodically rather than only on connect.
+    uint32_t m_telemetry_ticks = 0;
+
     WifiConfigInfo_st m_wifi_cfg = {};
     MqttConfigInfo_st m_mqtt_cfg = {};
 

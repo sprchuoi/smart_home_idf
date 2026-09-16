@@ -21,6 +21,10 @@
 namespace {
 // How often run() publishes link diagnostics and logs a heartbeat.
 constexpr uint32_t TELEMETRY_INTERVAL_MS = 30000;
+
+// Refresh the retained status document every N telemetry cycles (so every
+// 30 s * 10 = 5 minutes). See publishTelemetry() for why this is needed at all.
+constexpr uint32_t STATUS_EVERY_N_TICKS = 10;
 }  // namespace
 
 const char* Application::TAG = "Application";
@@ -277,6 +281,21 @@ void Application::publishTelemetry() {
 
     m_mqtt_service.publishSensor(
         "uptime", (float)(esp_timer_get_time() / 1000000), "s");
+
+    // Refresh the status document periodically, not only on connect.
+    //
+    // Smart_Server's bridge stamps Device.last_seen when it handles a *status*
+    // message; sensor messages do not touch it. Publishing status only on
+    // connect would therefore leave last_seen frozen at boot, and the server
+    // would consider a perfectly healthy node stale within one keepalive.
+    //
+    // Every STATUS_EVERY_N_TICKS cycles rather than every cycle: this is a
+    // retained QoS 1 publish, and hammering it would be 2880 retained writes
+    // a day for a value that barely changes.
+    if (++m_telemetry_ticks >= STATUS_EVERY_N_TICKS) {
+        m_telemetry_ticks = 0;
+        m_mqtt_service.publishDeviceStatus();
+    }
 }
 
 void Application::run() {

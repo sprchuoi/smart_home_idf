@@ -20,7 +20,20 @@ if [ ! -f "$COMPOSE_DIR/docker-compose.yml" ]; then
 fi
 
 compose() {
-    ( cd "$COMPOSE_DIR" && docker compose "$@" )
+    # BUILDX_BUILDER=default is deliberate.
+    #
+    # The global buildx default on this machine is a `docker-container` driver
+    # builder (used by another project). Those run BuildKit inside its own
+    # container with its own network path, and image metadata resolution
+    # through it times out against registry-1.docker.io:
+    #
+    #     failed to solve: ... failed to resolve source metadata for
+    #     docker.io/library/python:3.11-slim: net/http: TLS handshake timeout
+    #
+    # The built-in `default` driver talks to the daemon directly and resolves
+    # base images from the local image store, which sidesteps it entirely.
+    # Override by exporting BUILDX_BUILDER if you need a different one.
+    ( cd "$COMPOSE_DIR" && BUILDX_BUILDER="${BUILDX_BUILDER:-default}" docker compose "$@" )
 }
 
 # The address the ESP should be pointed at.
