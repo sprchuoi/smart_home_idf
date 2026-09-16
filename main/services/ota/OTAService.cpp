@@ -172,8 +172,8 @@ void OTAService::publishProgress(uint32_t percent, const char* status) {
     event.source = EventSource::OTA_SERVICE;
     event.destination = EventSource::APPLICATION;
     event.payload.ota_info.progress_percent = percent;
-    event.payload.ota_info.status = status;
-    
+    setEventOtaStatus(event, status);
+
     EventBus::getInstance().publish(event);
 }
 

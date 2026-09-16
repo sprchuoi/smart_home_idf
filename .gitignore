@@ -34,7 +34,10 @@ Thumbs.db
 
 # ESP-IDF
 dependencies.lock
-sdkconfig.defaults
+# NOTE: sdkconfig.defaults is deliberately NOT ignored. The build depends on it
+# (ESP-IDF picks it up from the project root automatically), so a fresh clone
+# without it does not reproduce the firmware. Only the generated sdkconfig is
+# per-machine and ignored, above.
 
 # Python
 *.egg-info/

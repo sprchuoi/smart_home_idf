@@ -114,13 +114,9 @@ bool MqttService::publish(const char* topic, const char* data, size_t data_len) 
     }
     
     ESP_LOGI(TAG, "Published to %s (msg_id: %d, QoS 0)", topic, msg_id);
-    
-    EventPayload payload;
-    payload.mqtt_data.topic = topic;
-    payload.mqtt_data.data = data;
-    payload.mqtt_data.data_len = data_len;
-    publishEvent(EventType::MQTT_PUBLISHED, payload);
-    
+
+    publishEvent(EventType::MQTT_PUBLISHED);
+
     return true;
 }
 
@@ -165,11 +161,9 @@ bool MqttService::subscribe(const char* topic, int qos) {
     }
     
     ESP_LOGI(TAG, "Subscribed to %s (msg_id: %d, QoS 0)", topic, msg_id);
-    
-    EventPayload payload;
-    payload.mqtt_data.topic = topic;
-    publishEvent(EventType::MQTT_SUBSCRIBED, payload);
-    
+
+    publishEvent(EventType::MQTT_SUBSCRIBED);
+
     return true;
 }
 
@@ -227,26 +221,18 @@ void MqttService::mqttEventHandler(void* handler_args, esp_event_base_t base,
             service->publishEvent(EventType::MQTT_DISCONNECTED);
             break;
             
-        case MQTT_EVENT_DATA: {
-            ESP_LOGI(TAG, "MQTT data received on topic: %.*s", event->topic_len, event->topic);
-            
-            // Copy topic and data (they may not be null-terminated)
-            char topic[128] = {0};
-            char data[512] = {0};
-            size_t topic_len = (event->topic_len < sizeof(topic) - 1) ? event->topic_len : sizeof(topic) - 1;
-            size_t data_len = (event->data_len < sizeof(data) - 1) ? event->data_len : sizeof(data) - 1;
-            
-            memcpy(topic, event->topic, topic_len);
-            memcpy(data, event->data, data_len);
-            
-            EventPayload payload;
-            payload.mqtt_data.topic = topic;
-            payload.mqtt_data.data = data;
-            payload.mqtt_data.data_len = data_len;
-            
-            service->publishEvent(EventType::MQTT_DATA_RECEIVED, payload);
+        case MQTT_EVENT_DATA:
+            // esp-mqtt's topic/data point into its own buffer and are valid only
+            // for the duration of this callback; they are not NUL-terminated.
+            // They deliberately do not travel through the EventBus, whose
+            // payload is a fixed-size union copied by value -- copying these
+            // into stack locals and queueing pointers to them was a
+            // use-after-free.
+            ESP_LOGI(TAG, "MQTT data on %.*s: %.*s",
+                     event->topic_len, event->topic,
+                     event->data_len, event->data);
+            // Phase 2 replaces this with a command callback.
             break;
-        }
         
         case MQTT_EVENT_ERROR:
             ESP_LOGE(TAG, "MQTT error");

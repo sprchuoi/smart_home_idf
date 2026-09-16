@@ -213,8 +213,8 @@ void PowerManager::suspendServices() {
     event.type = EventType::STATE_CHANGED;
     event.source = EventSource::APPLICATION;
     event.destination = EventSource::APPLICATION;
-    event.payload.state_info.state_name = "SLEEP";
-    
+    setEventStateName(event, "SLEEP");
+
     EventBus::getInstance().publish(event);
 }
 
@@ -226,8 +226,8 @@ void PowerManager::resumeServices() {
     event.type = EventType::STATE_CHANGED;
     event.source = EventSource::APPLICATION;
     event.destination = EventSource::APPLICATION;
-    event.payload.state_info.state_name = "RUNNING";
-    
+    setEventStateName(event, "RUNNING");
+
     EventBus::getInstance().publish(event);
 }
 

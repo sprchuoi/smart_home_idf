@@ -1,19 +1,14 @@
 idf_component_register(
-    SRCS 
+    SRCS
         "main.cpp"
         "app/src/Application.cpp"
-        "app/cfg/Application_cfg.hpp"
         "core/eventbus/EventBus.cpp"
         "core/statemachine/AppStateMachine.cpp"
-        "core/audio/AudioStateMachine.cpp"
         "core/powermanager/PowerManager.cpp"
         "core/watchdog/WatchdogSupervisor.cpp"
-        "services/wifi/cfg/Wifi_cfg.hpp"
         "services/wifi/WifiService.cpp"
         "services/wifi/WifiConfigInterface.cpp"
         "services/mqtt/MqttService.cpp"
-        "services/wakeup/WakeWordService.cpp"
-        "services/audio/AudioPipeline.cpp"
         "services/ota/OTAService.cpp"
         "drivers/oled/OledDisplay.cpp"
         "drivers/uart/UartDriver.cpp"
@@ -36,8 +31,4 @@ idf_component_register(
         esp_https_ota
         esp_system
         console
-)
-
-set(SDKCONFIG_DEFAULTS
-    sdkconfig.defaults
 )

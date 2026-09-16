@@ -11,11 +11,12 @@
 #include <functional>
 #include <vector>
 #include <memory>
+#include <cstddef>
+#include <cstring>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
-#include "uart/cfg/Uart_cfg.hpp"
 
 /**
  * @brief Event types in the system
@@ -88,8 +89,27 @@ enum class EventSource : uint8_t {
     UART_DRIVER
 };
 
+static constexpr size_t EVENT_ERROR_MSG_MAX_LEN  = 64;
+static constexpr size_t EVENT_STATE_NAME_MAX_LEN = 32;
+static constexpr size_t EVENT_OTA_STATUS_MAX_LEN = 24;
+
 /**
  * @brief Event payload union
+ *
+ * Every member is trivially copyable and self-contained. The entire
+ * EventMessage is copied into a FreeRTOS queue, so any pointer stored here
+ * would be copied while the bytes it pointed at stayed behind on the
+ * publisher's stack.
+ *
+ * That was a real, unconditional use-after-free, not a latent one:
+ * AppStateMachine assigned `getStateString().c_str()` into state_name, and
+ * getStateString() returns std::string **by value**, so the pointer dangled
+ * before publish() was even called. MqttService did the same thing with
+ * stack-local topic/payload buffers.
+ *
+ * Variable-length data (MQTT topic/payload, UART RX bytes) deliberately has no
+ * member here. Its owners hand it to their consumer directly rather than
+ * routing it through a fixed-size union.
  */
 union EventPayload {
     struct {
@@ -97,36 +117,26 @@ union EventPayload {
         uint32_t netmask;
         uint32_t gateway;
     } wifi_ip_info;
-    
+
     struct {
-        const char* topic;
-        const char* data;
-        size_t data_len;
-    } mqtt_data;
-    
-    struct {
-        int error_code;
-        char error_msg[128];
+        int32_t error_code;
+        char    error_msg[EVENT_ERROR_MSG_MAX_LEN];
     } error_info;
-    
+
     struct {
-        const char* state_name;
+        uint16_t len;                             // valid bytes in text[]
+        char     text[EVENT_STATE_NAME_MAX_LEN];
     } state_info;
-    
+
     struct {
         uint32_t progress_percent;
-        const char* status;
+        char     status[EVENT_OTA_STATUS_MAX_LEN];
     } ota_info;
-    
-    struct {
-        uint8_t data[UART_RX_BUF_SIZE];
-        size_t  data_len;
-    } uart_data;
-    
+
     struct {
         uint8_t mode;
     } power_info;
-    
+
     uint32_t raw_data;
 };
 
@@ -140,6 +150,41 @@ struct EventMessage {
     EventPayload payload;
     uint32_t timestamp;
 };
+
+/**
+ * @brief Copy a string into an event payload, truncating safely.
+ *
+ * Use these instead of assigning a pointer. They are the only supported way to
+ * populate the string-bearing payload members, which is what keeps the "queue
+ * a pointer to someone else's buffer" bug from coming back.
+ */
+inline void setEventStateName(EventMessage& msg, const char* name) {
+    if (name == nullptr) {
+        name = "";
+    }
+    const size_t n = strnlen(name, sizeof(msg.payload.state_info.text) - 1);
+    memcpy(msg.payload.state_info.text, name, n);
+    msg.payload.state_info.text[n] = '\0';
+    msg.payload.state_info.len = static_cast<uint16_t>(n);
+}
+
+inline void setEventOtaStatus(EventMessage& msg, const char* status) {
+    if (status == nullptr) {
+        status = "";
+    }
+    const size_t n = strnlen(status, sizeof(msg.payload.ota_info.status) - 1);
+    memcpy(msg.payload.ota_info.status, status, n);
+    msg.payload.ota_info.status[n] = '\0';
+}
+
+inline void setEventErrorMsg(EventMessage& msg, const char* text) {
+    if (text == nullptr) {
+        text = "";
+    }
+    const size_t n = strnlen(text, sizeof(msg.payload.error_info.error_msg) - 1);
+    memcpy(msg.payload.error_info.error_msg, text, n);
+    msg.payload.error_info.error_msg[n] = '\0';
+}
 
 /**
  * @brief Event subscriber callback type

@@ -237,8 +237,12 @@ void AppStateMachine::transitionTo(AppState new_state) {
     event.type = EventType::STATE_CHANGED;
     event.source = EventSource::STATE_MACHINE;
     event.destination = EventSource::APPLICATION;
-    event.payload.state_info.state_name = getStateString().c_str();
-    
+    // getStateString() returns std::string *by value*, so taking .c_str() here
+    // would leave state_name dangling before publish() was even reached -- and
+    // the payload is then copied into a queue, not by reference.
+    const std::string state_name = getStateString();
+    setEventStateName(event, state_name.c_str());
+
     EventBus::getInstance().publish(event);
 }
 
