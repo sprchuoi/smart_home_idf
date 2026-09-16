@@ -230,10 +230,16 @@ void MqttService::eventHandler(void* handler_args, esp_event_base_t, int32_t eve
         case MQTT_EVENT_CONNECTED:
             self->m_connected.store(true);
             self->onConnected();
+            if (self->m_connection_cb) {
+                self->m_connection_cb(true);
+            }
             break;
 
         case MQTT_EVENT_DISCONNECTED:
             self->m_connected.store(false);
+            if (self->m_connection_cb) {
+                self->m_connection_cb(false);
+            }
             // Hand the reconnect to the service task: esp-mqtt documents that
             // client APIs other than publish/subscribe must not be called from
             // inside this handler.

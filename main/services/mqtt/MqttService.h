@@ -34,6 +34,14 @@
 using MqttCommandCallback = std::function<void(const char* topic, size_t topic_len,
                                                const char* data, size_t data_len)>;
 
+/**
+ * @brief Broker connection state changed.
+ *
+ * Invoked from the esp-mqtt task, so it must not block and must not call
+ * esp-mqtt APIs.
+ */
+using MqttConnectionCallback = std::function<void(bool connected)>;
+
 class MqttService {
 public:
     MqttService();
@@ -45,6 +53,15 @@ public:
     bool initialize(const MqttConfigInfo_st* cfg);
 
     void setCommandCallback(MqttCommandCallback cb) { m_command_cb = std::move(cb); }
+
+    /**
+     * @brief Register a callback for broker connection state changes.
+     *
+     * Without this the application state would stay at MQTT_CONNECTING
+     * forever: connecting happens asynchronously, after initialize() has
+     * already returned.
+     */
+    void setConnectionCallback(MqttConnectionCallback cb) { m_connection_cb = std::move(cb); }
 
     /**
      * @brief Begin connecting. Call once WiFi has an address. Idempotent.
@@ -118,6 +135,7 @@ private:
     std::string m_response_topic;  // smart_home/devices/<id>/response
     std::string m_sensor_prefix;   // smart_home/devices/<id>/sensor/
     MqttCommandCallback m_command_cb;
+    MqttConnectionCallback m_connection_cb;
 
     static const char* TAG;
 

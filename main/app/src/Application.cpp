@@ -101,6 +101,8 @@ bool Application::initialize() {
             [this](const char* t, size_t tl, const char* d, size_t dl) {
                 onMqttCommand(t, tl, d, dl);
             });
+        m_mqtt_service.setConnectionCallback(
+            [this](bool connected) { onMqttConnection(connected); });
         // Not started here -- it waits for an IP address, in onWifiEvent().
     }
 
@@ -164,6 +166,18 @@ void Application::onWifiEvent(const WifiQueueEvent& event) {
             // instead of waiting out the 45 s keepalive.
             m_mqtt_service.notifyWifiDown();
             break;
+    }
+}
+
+void Application::onMqttConnection(bool connected) {
+    // Runs in the esp-mqtt task. setState() is an atomic exchange plus a log
+    // line, so it is safe here.
+    if (connected) {
+        m_state_machine.setState(AppState::RUNNING);
+    } else if (m_state_machine.getState() == AppState::RUNNING) {
+        // Back to CONNECTING rather than ERROR: a broker restart is expected
+        // and the reconnect loop will handle it.
+        m_state_machine.setState(AppState::MQTT_CONNECTING);
     }
 }
 
@@ -273,9 +287,10 @@ void Application::run() {
 
     ESP_LOGI(TAG, "Application running...");
 
-    if (m_mqtt_service.isConnected()) {
-        m_state_machine.setState(AppState::RUNNING);
-    }
+    // The RUNNING transition comes from onMqttConnection(), not from here:
+    // run() is reached before the broker connection completes, so a check at
+    // this point would always be false and the state would never advance past
+    // MQTT_CONNECTING.
 
     while (m_running) {
         ESP_LOGI(TAG, "alive | state:%s | wifi:%s | mqtt:%s",
