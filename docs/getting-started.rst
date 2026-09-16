@@ -1,190 +1,149 @@
 Getting Started
 ===============
 
-This guide will help you set up and build the ESP32 Smart Home firmware.
+Build, flash and provision an ESP32-S3 node.
 
 Prerequisites
 -------------
 
-Required
-~~~~~~~~
+Required:
 
-* **ESP-IDF v5.x** - Espressif IoT Development Framework
-* **Python 3.6+** - For build tools
-* **CMake 3.16+** - Build system
-* **Ninja** - Build backend
-* **Git** - Version control
+* **ESP-IDF v5.5.1** -- the version this project is built and tested against
+* **Python 3.8+**, **CMake 3.16+**, **Ninja**, **Git**
 
-Optional
-~~~~~~~~
+Optional:
 
-* **QEMU** - For emulation testing
-* **Doxygen** - For API documentation
-* **cppcheck** - For static analysis
+* **Doxygen** and **Sphinx** -- to build these docs (``./make.sh doc``)
+* **cppcheck** -- static analysis (``./make.sh test``)
 
-Installation
-------------
-
-1. Install ESP-IDF
-~~~~~~~~~~~~~~~~~~
+Install ESP-IDF
+---------------
 
 .. code-block:: bash
 
-   mkdir -p ~/esp
-   cd ~/esp
+   mkdir -p ~/esp && cd ~/esp
    git clone --recursive https://github.com/espressif/esp-idf.git
    cd esp-idf
-   ./install.sh esp32
+   ./install.sh esp32s3
    . ./export.sh
 
-2. Clone Repository
-~~~~~~~~~~~~~~~~~~~
+Note the target: **esp32s3**, not ``esp32``.
+
+Get the source
+--------------
 
 .. code-block:: bash
 
-   git clone https://github.com/yourusername/smart_home.git
-   cd smart_home
-
-3. Setup Environment
-~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-
+   git clone https://github.com/sprchuoi/smart_home_idf.git
+   cd smart_home_idf
    ./make.sh setup
 
-This will:
-* Check prerequisites
-* Verify ESP-IDF installation
-* Install Python dependencies
-* Create necessary directories
-
-Configuration
--------------
-
-WiFi Credentials
-~~~~~~~~~~~~~~~~
-
-Configure WiFi credentials using NVS:
-
-.. code-block:: cpp
-
-   WifiConfigService::getInstance().setSSID("YourSSID");
-   WifiConfigService::getInstance().setPassword("YourPassword");
-
-Or edit ``main/app/Application.cpp`` to set credentials programmatically.
-
-MQTT Broker
-~~~~~~~~~~~
-
-Edit ``main/app/Application.cpp``:
-
-.. code-block:: cpp
-
-   const char* mqtt_broker = "mqtt://192.168.1.100:1883";
-   const char* mqtt_client_id = "esp32_smart_home";
-
-Hardware Configuration
-~~~~~~~~~~~~~~~~~~~~~~
-
-I2S Audio Pins (default):
-* BCLK: GPIO 4
-* WS: GPIO 5
-* DIN: GPIO 18
-
-OLED Display Pins (default):
-* SDA: GPIO 21
-* SCL: GPIO 22
-* I2C Address: 0x3C
-
-Building
---------
-
-Standard Build
-~~~~~~~~~~~~~~
+Build
+-----
 
 .. code-block:: bash
 
    ./make.sh build
 
-This will:
-* Source ESP-IDF environment
-* Configure project
-* Build firmware
-* Show build information
+The build target, flash size and PSRAM mode come from ``sdkconfig.defaults``,
+which is committed. Do not set them by hand -- in particular, the N16R8 uses
+**octal** PSRAM, and configuring the wrong mode produces a boot loop rather
+than a build error.
 
-Clean Build
-~~~~~~~~~~~
-
-.. code-block:: bash
-
-   ./make.sh clean
-   ./make.sh build
-
-Flashing
---------
-
-Flash to Device
-~~~~~~~~~~~~~~~
+Check the image before flashing
+-------------------------------
 
 .. code-block:: bash
 
-   ./make.sh flash
+   ./make.sh smoke
 
-Flash and Monitor
-~~~~~~~~~~~~~~~~~
+This verifies the things that actually go wrong: that the image targets
+esp32s3, that flash is 16 MB, that PSRAM is octal, that logging is compiled in,
+that ``otadata``/``ota_0``/``ota_1`` exist, and that the image fits a slot. It
+fails loudly rather than leaving you to discover the problem on the bench.
+
+Flash
+-----
 
 .. code-block:: bash
 
    ./make.sh flash-monitor
 
-Testing
--------
+Provision
+---------
 
-Run Tests
-~~~~~~~~~
+Nothing device-specific is compiled in. Everything is set over the serial
+console and stored in NVS.
 
-.. code-block:: bash
+**1. WiFi**
 
-   ./make.sh test
+.. code-block:: text
 
-QEMU Testing
-~~~~~~~~~~~~
+   esp32> wifi_set <ssid> <password>
 
-.. code-block:: bash
+**2. MQTT broker**
 
-   ./make.sh setup-qemu
-   ./make.sh test-qemu
+.. code-block:: text
+
+   esp32> mqtt_set <broker-host> [port]     # port defaults to 1883
+   esp32> mqtt_auth <username> <password>   # omit for an anonymous broker
+
+**3. Device identity**
+
+.. code-block:: text
+
+   esp32> mqtt_device <device_id> <name> [room]
+
+``device_id`` must be lowercase letters, digits, ``-`` or ``_``. It becomes an
+MQTT topic segment and a Home Assistant identifier, so anything else is
+rejected rather than silently producing discovery topics that never match.
+
+If you skip this step, an id is derived from the factory MAC as
+``shnode-xxxxxx`` and stored, so it stays stable across reboots.
+
+**4. Apply and verify**
+
+.. code-block:: text
+
+   esp32> mqtt_status
+   esp32> reboot
+
+After rebooting you should see it associate, get an IP, and connect to the
+broker:
+
+.. code-block:: text
+
+   I (4210) Application: Got IP 192.168.1.42
+   I (4480) MqttService: Connected to 192.168.1.10:1883
+
+The node then publishes retained discovery topics, so it appears in Home
+Assistant automatically under Settings → Devices.
 
 Troubleshooting
 ---------------
 
-ESP-IDF Not Found
-~~~~~~~~~~~~~~~~~~
+**The board boot-loops immediately.** Almost always the wrong PSRAM mode.
+Confirm ``CONFIG_SPIRAM_MODE_OCT=y`` in ``sdkconfig`` -- the N16R8 has octal
+PSRAM, and the Kconfig default is quad.
+
+**``idf.py: command not found``.** The ESP-IDF environment is not sourced:
+``. ~/esp/esp-idf/export.sh``.
+
+**The board boots but never connects.** Check ``mqtt_status`` for a missing
+broker host, and confirm the broker is reachable from the same subnet.
+
+**Nothing appears in Home Assistant.** Verify the node is publishing by
+subscribing from the Pi:
 
 .. code-block:: bash
 
-   export IDF_PATH=~/esp/esp-idf
-   ./make.sh setup
+   mosquitto_sub -h localhost -t 'homeassistant/#' -v
 
-Build Failures
-~~~~~~~~~~~~~~
+**Build failures after pulling.** ``./make.sh clean && ./make.sh build``.
 
-.. code-block:: bash
-
-   ./make.sh clean
-   ./make.sh build
-
-Permission Denied
-~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-
-   chmod +x make.sh
-
-Next Steps
+Next steps
 ----------
 
-* Read the :doc:`architecture` documentation
-* Explore the :doc:`api/index` reference
-* Check :doc:`development` guide
-
+* :doc:`architecture` -- how the firmware is put together
+* :doc:`api/index` -- component reference
+* :doc:`deployment` -- running it for real

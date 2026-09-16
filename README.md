@@ -1,106 +1,108 @@
-# ESP32 Smart Home Application
+# ESP32-S3 Smart Home
 
-A production-ready, low-power, real-time, voice-activated ESP32 smart home firmware using ESP-IDF v5.x, FreeRTOS, and modern C++ architecture.
+Firmware for ESP32-S3 sensor and actuator nodes that appear in Google Home,
+via Home Assistant and a local Matter bridge.
 
-[![CI/CD Pipeline](https://github.com/sprchuoi/smart_home_idf/actions/workflows/ci.yml/badge.svg)](https://github.com/sprchuoi/smart_home_idf/actions/workflows/ci.yml)
+[![CI](https://github.com/sprchuoi/smart_home_idf/actions/workflows/ci.yml/badge.svg)](https://github.com/sprchuoi/smart_home_idf/actions/workflows/ci.yml)
 [![Documentation](https://github.com/sprchuoi/smart_home_idf/actions/workflows/docs.yml/badge.svg)](https://github.com/sprchuoi/smart_home_idf/actions/workflows/docs.yml)
 
-📖 **[View Full Documentation](https://sprchuoi.github.io/smart_home_idf/)** | 📚 **[API Reference](https://sprchuoi.github.io/smart_home_idf/doxygen/)**
+📖 **[Documentation](https://sprchuoi.github.io/smart_home_idf/)** · 📚 **[API reference](https://sprchuoi.github.io/smart_home_idf/doxygen/)** · 🗺 **[Roadmap](ROADMAP.md)**
 
-## Features
+## The idea
 
-- **Dual-core FreeRTOS architecture** - Optimized task allocation (Core 0: Networking, Core 1: Application)
-- **Audio DMA pipeline** - I2S audio capture with ESP-SR wake word detection
-- **Power management** - Sleep modes (NORMAL, MODEM_SLEEP, LIGHT_SLEEP) with multiple wake-up sources
-- **HTTPS OTA updates** - Secure over-the-air firmware updates with progress reporting
-- **Home Assistant integration** - MQTT auto-discovery, QoS 0 communication
-- **Task watchdog** - Real-time task monitoring with safe reset on timeout
-- **Thread-safe IPC** - Event-driven architecture using FreeRTOS queues
-- **UART communication** - Interrupt-driven UART RX handling
+The obvious way to get a DIY device into Google Home is to run Matter on the
+microcontroller. That works, but it is the hard road — and unnecessary.
 
-## Quick Start
+**Google Home only ever needs to see a Matter bridge.** How that bridge gets
+its data is irrelevant to Google. So the node speaks plain MQTT and a Raspberry
+Pi does the bridging:
+
+```
+        Google Home app  ·  Nest speaker
+                    │  Matter (local only)
+        ┌───────────▼─────────────────────────────┐
+        │  Raspberry Pi                            │
+        │    Mosquitto   ← MQTT broker             │
+        │    Home Assistant                        │
+        │      └─ Matter bridge add-on             │
+        └───────────┬──────────────────────────────┘
+                    │  MQTT over WiFi 2.4 GHz
+        ┌───────────▼──────────────────────────────┐
+        │  ESP32-S3 nodes — sensors + actuators    │
+        └──────────────────────────────────────────┘
+```
+
+No cloud project, no OAuth server, no public endpoint, nothing exposed to the
+internet, and no recurring cost. See [the docs](https://sprchuoi.github.io/smart_home_idf/)
+for the full rationale.
+
+## What it does today
+
+- Targets **ESP32-S3** (DevKitC-1 N16R8: 16 MB flash, 8 MB octal PSRAM)
+- Connects to WiFi, with credentials provisioned over the serial console into NVS
+- Publishes to MQTT with a Last Will, exponential-backoff reconnect, and per-class QoS
+- Announces itself to Home Assistant via MQTT discovery
+- Reports link diagnostics: RSSI, free heap, uptime, connectivity
+- Supports HTTPS OTA into a dual-slot partition table
+
+**Not yet on hardware.** Everything above is verified at build level only — see
+the verification checklist in [ROADMAP.md](ROADMAP.md).
+
+## Quick start
 
 ```bash
-# Setup environment
-./make.sh setup
-
-# Build project
-./make.sh build
-
-# Flash and monitor
-./make.sh flash-monitor
+./make.sh setup          # check toolchain, install Python deps
+./make.sh build          # build for ESP32-S3
+./make.sh smoke          # verify the image before flashing
+./make.sh flash-monitor  # flash and open the serial console
 ```
 
-## Prerequisites
-
-- ESP-IDF v5.x
-- Python 3.6+
-- CMake 3.16+
-- Ninja
-
-## Configuration
-
-Before building, configure:
-
-1. **WiFi Credentials**: Use `WifiConfigService` API or NVS
-2. **MQTT Broker**: Edit `main/app/Application.cpp`
-3. **Hardware Pins**: Configure I2S, OLED, UART pins in `main/app/Application.cpp`
-
-## Project Structure
+Then provision over that console:
 
 ```
-smart_home/
-├── main/              # Main application
-│   ├── app/          # Application orchestrator
-│   ├── core/         # Core services (EventBus, State Machines)
-│   ├── services/      # Service layer (WiFi, MQTT, Audio, OTA)
-│   ├── drivers/       # Hardware drivers (OLED, UART)
-│   └── error/         # Error handling
-├── docs/              # Sphinx documentation source
-└── make.sh            # Build script
+esp32> wifi_set <ssid> <password>
+esp32> mqtt_set <broker-host> [port]
+esp32> mqtt_device <device_id> <name> [room]
+esp32> reboot
 ```
 
-## Documentation
+Your device then appears in Home Assistant automatically. Full walkthrough in
+[Getting Started](https://sprchuoi.github.io/smart_home_idf/getting-started.html).
 
-Full documentation is available at: **https://yourusername.github.io/smart_home/**
+## Layout
 
-To build documentation locally:
-
-```bash
-./make.sh doc
+```
+main/
+├── app/          Application orchestrator — owns services, wires callbacks
+├── core/         Application state
+├── services/     WiFi, MQTT, OTA — each with its own NVS config
+├── drivers/      UART
+└── error/        Error logging and counters
+docs/             Sphinx user guide + Doxygen API reference
 ```
 
-Then open `docs/_build/html/index.html` in your browser.
+## Build commands
 
-## Build Commands
+| Command | Purpose |
+|---|---|
+| `./make.sh setup` | Check toolchain, install dependencies |
+| `./make.sh build` | Build firmware |
+| `./make.sh smoke` | Verify the image (target, PSRAM, log level, OTA slots, size) |
+| `./make.sh flash-monitor` | Flash and open the serial console |
+| `./make.sh test` | Static analysis |
+| `./make.sh doc` | Build the documentation |
+| `./make.sh ci` | Run the full pipeline locally |
 
-```bash
-./make.sh setup          # Setup environment
-./make.sh build          # Build project
-./make.sh clean          # Clean build
-./make.sh flash          # Flash to device
-./make.sh monitor        # Monitor serial
-./make.sh test           # Run tests
-./make.sh test-qemu      # Run QEMU tests
-./make.sh doc            # Generate documentation
-./make.sh ci             # Run CI/CD pipeline
-```
+## Deliberately absent
 
-## Architecture
+Recorded so their absence does not read as an oversight:
 
-The system uses an event-driven architecture:
+- **Audio and wake word.** Removed. No working wake-word model existed, and the
+  audio pipeline did not compile for the ESP32-S3.
+- **Power management.** Removed. Only `NORMAL` was implemented, and WiFi nodes
+  are not battery powered.
+- **OLED display.** Removed. Its render path was a stub with no framebuffer.
 
-- **EventBus**: Central IPC system using FreeRTOS queues
-- **State Machines**: Application and Audio state coordination
-- **Services**: Decoupled services communicating via events
-- **Drivers**: Hardware abstraction layer
+## Licence
 
-See [Architecture Documentation](https://yourusername.github.io/smart_home/architecture.html) for details.
-
-## License
-
-This project is provided as-is for educational and professional use.
-
-## Contributing
-
-See [Development Guide](https://yourusername.github.io/smart_home/development.html) for contribution guidelines.
+Provided as-is for educational and professional use.

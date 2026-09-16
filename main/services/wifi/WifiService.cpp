@@ -217,8 +217,10 @@ void WifiService::onWifiEvent(void* arg, esp_event_base_t event_base,
         return;
     }
     
-    // Post to queue - non-blocking
-    xQueueSendFromISR(service->m_event_queue, &queue_event, nullptr);
+    // Non-blocking post. This runs in the default esp_event task, not an ISR,
+    // so xQueueSend is the correct call -- the FromISR variant was wrong here
+    // and only worked by accident on this port.
+    xQueueSend(service->m_event_queue, &queue_event, 0);
 }
 
 void WifiService::handleWifiEvent(const WifiQueueEvent& event) {
@@ -231,20 +233,16 @@ void WifiService::handleWifiEvent(const WifiQueueEvent& event) {
             m_connected = true;
             m_reconnect_attempts = 0;
             m_should_reconnect = false;
-            
-            // Publish event - minimal EventPayload
-            {
-                EventPayload payload = {};
-                payload.wifi_ip_info.ip_addr = event.ip_addr;
-                publishEvent(EventType::WIFI_CONNECTED, payload);
-            }
             break;
-            
+
         case WifiEventType::DISCONNECTED:
             m_connected = false;
             m_should_reconnect = true;
-            publishEvent(EventType::WIFI_DISCONNECTED);
             break;
+    }
+
+    if (m_event_cb) {
+        m_event_cb(event);
     }
 }
 
@@ -279,14 +277,4 @@ void WifiService::taskLoop() {
 void WifiService::taskEntry(void* parameter) {
     WifiService* service = static_cast<WifiService*>(parameter);
     service->taskLoop();
-}
-
-void WifiService::publishEvent(EventType type, const EventPayload& payload) {
-    EventMessage event;
-    event.type = type;
-    event.source = EventSource::WIFI_SERVICE;
-    event.destination = EventSource::APPLICATION;
-    event.payload = payload;
-    
-    EventBus::getInstance().publish(event);
 }

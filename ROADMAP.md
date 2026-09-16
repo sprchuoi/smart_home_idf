@@ -15,7 +15,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo · `[!]` blocked · `?` ne
 |---|---|---|
 | 0 | Prerequisites & hardware ground truth | `[ ]` not started |
 | 1 | Retarget to ESP32-S3, clear dead weight | `[~]` **build + CI green; hardware verification outstanding** |
-| 2 | MQTT + Home Assistant | `[ ]` not started |
+| 2 | MQTT + Home Assistant | `[~]` **firmware complete; no broker contacted yet** |
 | 3 | Sensors | `[ ]` not started |
 | 4 | Google Home via Matter bridge | `[ ]` not started |
 | 5 | Actuators | `[ ]` not started |
@@ -160,19 +160,46 @@ boot heap reflects the EventBus saving.
 
 ## Phase 2 — MQTT and Home Assistant
 
-- [ ] MQTT: set `session.last_will` (today an `availability_topic` is advertised in discovery
-      but never published, and there is no will — so entities would always read unavailable)
-- [ ] Reconnect backoff; `disable_auto_reconnect = true` and own the loop, because esp-mqtt's
-      built-in reconnect is a fixed 10 s with no backoff
-- [ ] QoS per topic class: **1 for commands/state/availability/discovery, 0 for telemetry**
-- [ ] Replace `MqttService::taskLoop()`'s do-nothing 5 s sleep with a real reconnect supervisor
-- [ ] Topic schema: `smart_home/<id>/{availability,status,<chan>/state,cmd/<target>}`
-- [ ] Device identity + provisioning in NVS, cloning the console-command pattern from
-      `WifiConfigInterface.cpp`. Fix its `clearCredentials()` bug in the clone (it writes empty
-      strings, so `hasCredentials()` then returns true).
-- [ ] HA MQTT discovery per entity (not the current single hardcoded `binary_sensor`), with a
-      shared `device` block so entities group under one device
-- [ ] Pi: Mosquitto with auth, Home Assistant, MQTT integration
+### Firmware — DONE
+
+- [x] **EventBus replaced with direct callbacks.** The topology is a DAG
+      (`WiFi → MQTT → {publish, command → OTA}`) with no fan-out and one listener per edge.
+      Callbacks also make the dangling-pointer bug structurally impossible, since nothing is
+      queued. Note the bus had **zero consumers** — its drain points were called only from
+      services that were never instantiated.
+- [x] `session.last_will` set on `smart_home/<id>/availability`. Without it the discovery
+      payload advertised an availability topic that was never published, so every entity
+      would have read `unavailable` forever.
+- [x] `disable_auto_reconnect = true` and an owned reconnect loop with exponential backoff and
+      jitter — esp-mqtt's built-in reconnect is a fixed 10 s (`MQTT_RECON_DEFAULT_MS`) with
+      no backoff.
+- [x] QoS per topic class: **1 + retained** for availability/discovery/status (all must survive
+      a broker restart); **0** for telemetry (a stale reading has no value, and QoS 1 telemetry
+      during an outage just fills the outbox); **1** for commands, with a persistent session so
+      a command sent while the node reboots is queued.
+- [x] The do-nothing 5 s task is now a real reconnect supervisor.
+- [x] Topic schema: `smart_home/<id>/{availability,status,<chan>/state,cmd/<target>}`.
+- [x] `MqttConfigInterface`: broker, credentials, device id/name/room and OTA URL in NVS, with
+      `mqtt_set` / `mqtt_auth` / `mqtt_device` / `mqtt_status` / `mqtt_clear`. Its `clear()`
+      erases keys rather than writing `""` — the WiFi equivalent writes empty strings, which
+      leaves the key present so `hasCredentials()` keeps returning true.
+- [x] Device identity validated to `[a-z0-9_-]`; derived from MAC and persisted if unset.
+- [x] Config buffers are `MAX_LEN + 1`. (`Wifi_cfg.hpp`'s `char ssid[32]` cannot hold a legal
+      32-character SSID — still to fix.)
+- [x] HA discovery per entity via cJSON, with a shared `device` block, republished on every
+      connect.
+- [x] `OTAService` rewritten onto the incremental API. It previously called `esp_https_ota()`,
+      which returns no handle, then passed the still-null handle to
+      `esp_https_ota_get_img_desc()` — so the success path could never run. Its `timeout_ms`
+      of 5000 was also a *total-transfer* cap that would abort any real download.
+- [x] Telemetry: RSSI, free heap, uptime — diagnostics that need no sensor hardware, so the
+      pipeline can be verified before Phase 3.
+
+### Raspberry Pi — NOT STARTED
+
+- [ ] Mosquitto with authentication and no anonymous access
+- [ ] Home Assistant with the MQTT integration
+- [ ] Verify entities appear and availability tracks the node powering on/off
 
 **Exit criteria:** device appears in HA with correct availability; pulling power flips it to
 unavailable within the keepalive window; a command from HA reaches the board.
@@ -327,6 +354,34 @@ only ESP32/S2).
 - **No server-side code existed at all.** The Pi is greenfield.
 
 ---
+
+## Documentation
+
+- [x] **The published docs site was an infinite redirect loop.** `docs.yml` copied Sphinx's
+      `index.html` into `_site/`, then overwrote it with a page redirecting to `./index.html`
+      — itself. Sphinx's own index *is* the landing page, so the generated redirect was
+      removed entirely. Verified: the assembled `index.html` now contains zero refresh tags.
+- [x] Docs build with `-W` (warnings as errors), so they cannot silently rot the way the
+      firmware's did. This immediately caught four real breakages, below.
+- [x] `ErrorHandler::reportError`'s `__attribute__((format(printf,4,5)))` broke Breathe's C++
+      parser. Fixed with a Doxyfile `PREDEFINED` — and note the Doxyfile had **two**
+      `PREDEFINED` lines, of which Doxygen silently uses only the last.
+- [x] `FILE_PATTERNS` excluded `*.hpp`, so the config structs in `Mqtt_cfg.hpp`, `Wifi_cfg.hpp`
+      and `Uart_cfg.hpp` were never scanned.
+- [x] API pages referenced `AudioStateMachine`, `AudioState`, and `WifiConfigService` (a class
+      that never existed under that name — it is `WifiConfigInterface`).
+- [x] Doxyfile `INPUT` listed `ARCHITECTURE.md` and `ADVANCED_ARCHITECTURE.md`, neither of
+      which has ever existed.
+- [x] `docs.yml` deploys from a separate job with the `github-pages` environment, and runs on
+      PRs so docs breakage is caught before merge.
+- [x] **Content rewritten to match the software.** The old pages advertised voice activation,
+      an audio pipeline, power management and a task watchdog — none of which existed. The
+      docs now lead with the *concept* (why the Pi bridges Matter and the node does not) and
+      then describe the *software* as built: layout, callback edges, task/core allocation,
+      the MQTT topic table with QoS rationale, discovery, provisioning, and OTA.
+- [x] `README.md` rewritten; it claimed "voice-activated" and "ESP-SR wake word detection".
+- [x] A **Status** table on the docs landing page states plainly what is done and what is not,
+      including that nothing has run on hardware yet.
 
 ## Open decisions
 

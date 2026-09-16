@@ -1,16 +1,22 @@
 # Doxygen configuration for ESP32 Smart Home
 
-PROJECT_NAME           = "ESP32 Smart Home"
+PROJECT_NAME           = "ESP32-S3 Smart Home"
 PROJECT_NUMBER         = "1.0.0"
-PROJECT_BRIEF          = "Production-ready ESP32 smart home firmware"
+PROJECT_BRIEF          = "ESP32-S3 sensor and actuator nodes for Home Assistant"
 
 OUTPUT_DIRECTORY       = doxygen
+# ARCHITECTURE.md and ADVANCED_ARCHITECTURE.md were listed here but never
+# existed. The architecture write-up lives in docs/architecture.rst, which
+# Sphinx renders; ROADMAP.md is included because it is a real root document.
 INPUT                  = main \
                          README.md \
-                         ARCHITECTURE.md \
-                         ADVANCED_ARCHITECTURE.md
+                         ROADMAP.md
 
+# *.hpp was missing, so the config structs in Mqtt_cfg.hpp / Wifi_cfg.hpp /
+# Uart_cfg.hpp were never scanned -- referencing one from docs failed the
+# Sphinx build with "Cannot find class ... in doxygen xml output".
 FILE_PATTERNS          = *.h \
+                         *.hpp \
                          *.cpp \
                          *.md
 
@@ -71,9 +77,17 @@ EXPAND_ONLY_PREDEF     = NO
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           =
 INCLUDE_FILE_PATTERNS  =
+# NOTE: this is the only PREDEFINED line that takes effect -- Doxygen uses the
+# last one, so anything set earlier is silently ignored.
+#
+# __attribute__(x)= strips compiler attributes. ErrorHandler::reportError
+# carries __attribute__((format(printf,4,5))); Doxygen copies the raw
+# declaration into its XML and Breathe's C++ parser cannot handle it, which
+# fails the Sphinx build. The attribute still does its job for the compiler.
 PREDEFINED             = ESP_PLATFORM \
                          ESP_IDF_VERSION_MAJOR \
-                         ESP_IDF_VERSION_MINOR
+                         ESP_IDF_VERSION_MINOR \
+                         __attribute__(x)=
 
 SKIP_FUNCTION_MACROS   = YES
 

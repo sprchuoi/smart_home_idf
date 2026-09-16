@@ -1,72 +1,62 @@
 /**
  * @file OTAService.h
- * @brief OTA Update Service (Core 0)
- * 
- * HTTPS OTA updates with rollback protection.
- * Blocks sleep modes during OTA.
+ * @brief HTTPS OTA update service
+ *
+ * Writes to the inactive OTA slot and reboots into it. Requires the dual-slot
+ * partition table now in partitions.csv -- the previous single `factory`
+ * partition meant this could never have worked.
+ *
+ * Progress is reported through a callback rather than the removed EventBus.
  */
 
 #pragma once
 
-#include "core/eventbus/EventBus.h"
 #include "esp_https_ota.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
+#include <atomic>
+#include <functional>
 #include <string>
 
-/**
- * @brief OTA Service
- * 
- * Handles HTTPS OTA updates with progress reporting
- */
+/// Called from the OTA task as the image downloads. Keep it short.
+using OtaProgressCallback = std::function<void(int percent)>;
+
 class OTAService {
 public:
     OTAService();
     ~OTAService();
-    
-    /**
-     * @brief Initialize OTA service
-     * @return true on success
-     */
+
     bool initialize();
-    
+
+    void setProgressCallback(OtaProgressCallback cb) { m_progress_cb = std::move(cb); }
+
     /**
-     * @brief Start OTA update
-     * @param url HTTPS URL of firmware image
-     * @return true on success
+     * @brief Request an update. Returns immediately; the OTA task does the work.
      */
-    bool startOTA(const char* url);
-    
-    /**
-     * @brief Check if OTA is in progress
-     * @return true if OTA is active
-     */
-    bool isOTAInProgress() const { return m_ota_in_progress; }
-    
-    /**
-     * @brief Stop OTA service
-     */
+    bool requestUpdate(const char* url);
+
+    bool isOTAInProgress() const { return m_ota_in_progress.load(); }
+
     void stop();
-    
-    /**
-     * @brief FreeRTOS task entry point
-     */
+
     static void taskEntry(void* parameter);
 
 private:
     void taskLoop();
-    void publishProgress(uint32_t percent, const char* status);
-    
-    TaskHandle_t m_task_handle;
-    SemaphoreHandle_t m_ota_mutex;
-    bool m_initialized;
-    bool m_ota_in_progress;
+    void runUpdate(const std::string& url);
+    void reportProgress(int percent);
+
+    TaskHandle_t m_task_handle = nullptr;
+    SemaphoreHandle_t m_ota_mutex = nullptr;
+    bool m_initialized = false;
+    std::atomic<bool> m_stopping{false};
+    std::atomic<bool> m_ota_in_progress{false};
     std::string m_ota_url;
-    
+    OtaProgressCallback m_progress_cb;
+
     static const char* TAG;
     static constexpr int TASK_STACK_SIZE = 8192;
     static constexpr int TASK_PRIORITY = 6;
-    static constexpr BaseType_t TASK_CORE = 0;  // Core 0
+    static constexpr BaseType_t TASK_CORE = 0;
 };
-

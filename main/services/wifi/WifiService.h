@@ -8,7 +8,6 @@
 
 #pragma once
 
-#include "core/eventbus/EventBus.h"
 #include "services/wifi/WifiConfigInterface.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -17,6 +16,8 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include <cstring>
+#include <functional>
+#include <string>
 
 // Minimal event structure to reduce stack usage
 enum class WifiEventType : uint8_t {
@@ -32,10 +33,21 @@ struct WifiQueueEvent {
 };
 
 /**
+ * @brief Link-state callback.
+ *
+ * Invoked from the WifiService task, not from the esp_event handler, so it is
+ * safe to block briefly. Keep it short.
+ */
+using WifiEventCallback = std::function<void(const WifiQueueEvent&)>;
+
+/**
  * @brief WiFi Service
- * 
- * Event-driven WiFi management with auto-reconnect
- * Publishes WiFi events to EventBus
+ *
+ * Event-driven WiFi management with auto-reconnect.
+ * Reports link-state changes through a registered callback rather than the
+ * (now removed) EventBus -- the edge is strictly 1:1, so a callback is both
+ * simpler and structurally incapable of the dangling-pointer bug that came
+ * with queueing payload pointers.
  * Optimized for minimal stack usage
  */
 class WifiService {
@@ -84,13 +96,20 @@ public:
     TaskHandle_t getTaskHandle() const { return m_task_handle; }
 
     /**
+     * @brief Register a callback for link-state changes.
+     *
+     * Called from the service task for STA_START, GOT_IP and DISCONNECTED.
+     * The caller owns whatever it does in response; this service does not.
+     */
+    void setEventCallback(WifiEventCallback cb) { m_event_cb = std::move(cb); }
+
+    /**
      * @brief FreeRTOS task entry point
      */
     static void taskEntry(void* parameter);
 
 private:
     void taskLoop();
-    void publishEvent(EventType type, const EventPayload& payload = {});
     void handleWifiEvent(const WifiQueueEvent& event);
     
     // Minimal event handler - only posts to queue
@@ -114,6 +133,7 @@ private:
     WifiConfigInfo_st m_wifi_cfg;
     esp_event_handler_instance_t m_wifi_event_inst;
     esp_event_handler_instance_t m_ip_event_inst;
+    WifiEventCallback m_event_cb;
 };
 
 

@@ -1,17 +1,20 @@
 /**
  * @file AppStateMachine.h
- * @brief Application State Machine (Core 1)
- * 
- * Central coordinator for application state transitions.
- * Receives events via EventBus and manages state.
+ * @brief Application state tracking
+ *
+ * This was a 294-line state machine with its own FreeRTOS task, an 8-state
+ * transition table, and 9 EventBus subscriptions. None of it ever ran, and
+ * none of it could: it waited on WIFI_STARTED and WIFI_GOT_IP, which no code
+ * published, so it would have sat in INIT forever.
+ *
+ * What is actually useful is the state itself -- it is what the MQTT status
+ * topic reports. That is all this is now. No task, no queue, no bus.
  */
 
 #pragma once
 
-#include "core/eventbus/EventBus.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include <string>
+#include <atomic>
+#include <cstdint>
 
 /**
  * @brief Application states
@@ -23,68 +26,38 @@ enum class AppState : uint8_t {
     MQTT_CONNECTING,
     RUNNING,
     OTA_UPDATING,
-    ERROR,
-    SLEEP
+    ERROR
 };
 
 /**
- * @brief Application State Machine
- * 
- * Central coordinator that manages application state transitions
- * based on events from various services
+ * @brief Application state holder
+ *
+ * Written by the service callbacks (WiFi link events, MQTT connect events) and
+ * read by whatever reports status. Atomic because those callbacks run in
+ * different task contexts.
  */
 class AppStateMachine {
 public:
-    AppStateMachine();
-    ~AppStateMachine();
-    
     /**
-     * @brief Initialize state machine
-     * @return true on success
+     * @brief Set the current state, logging transitions.
      */
-    bool initialize();
-    
+    void setState(AppState state);
+
     /**
-     * @brief Get current state
-     * @return Current state
+     * @brief Get the current state.
      */
-    AppState getState() const { return m_current_state; }
-    
+    AppState getState() const { return m_state.load(std::memory_order_relaxed); }
+
     /**
-     * @brief Get current state as string
-     * @return State name
+     * @brief Get the current state as a string.
      */
-    std::string getStateString() const;
-    
+    const char* getStateString() const { return toString(getState()); }
+
     /**
-     * @brief Get task handle (for watchdog)
+     * @brief Human-readable state name.
      */
-    TaskHandle_t getTaskHandle() const { return m_task_handle; }
-    
-    /**
-     * @brief Stop state machine
-     */
-    void stop();
-    
-    /**
-     * @brief FreeRTOS task entry point
-     */
-    static void taskEntry(void* parameter);
+    static const char* toString(AppState state);
 
 private:
-    void taskLoop();
-    void handleEvent(const EventMessage& event);
-    void transitionTo(AppState new_state);
-    void onStateEnter(AppState state);
-    void onStateExit(AppState state);
-    
-    TaskHandle_t m_task_handle;
-    AppState m_current_state;
-    bool m_initialized;
-    
-    static const char* TAG;
-    static constexpr int TASK_STACK_SIZE = 4096;
-    static constexpr int TASK_PRIORITY = 4;
-    static constexpr BaseType_t TASK_CORE = 1;  // Core 1
+    std::atomic<AppState> m_state{AppState::INIT};
 };
-

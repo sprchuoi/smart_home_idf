@@ -1,42 +1,40 @@
 API Reference
 =============
 
-Core Modules
-------------
-
-.. toctree::
-   :maxdepth: 2
-
-   eventbus
-   statemachine
-   powermanager
-   watchdog
+Component-level notes on what each part of the firmware is for and how it fits
+together. The exhaustive class and function listing is in the
+`Doxygen reference <../doxygen/index.html>`_, generated from the source.
 
 Services
 --------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    wifi
    mqtt
-   audio
    ota
+
+Core
+----
+
+.. toctree::
+   :maxdepth: 1
+
+   statemachine
 
 Drivers
 -------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
-   oled
    uart
 
-Error Handling
+Error handling
 --------------
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    errorhandler
-
