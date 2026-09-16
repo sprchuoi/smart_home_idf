@@ -9,6 +9,7 @@
 #include <cstring>
 #include <string>
 
+#include "cJSON.h"
 #include "nvs_flash.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
@@ -168,36 +169,81 @@ void Application::onWifiEvent(const WifiQueueEvent& event) {
 
 void Application::onMqttCommand(const char* topic, size_t topic_len,
                                 const char* data, size_t data_len) {
+    // The topic is always <prefix>/command; the verb lives in the body, which
+    // is how Smart_Server publishes it.
+    (void)topic;
+    (void)topic_len;
+
     // Copy out of esp-mqtt's buffer -- it is not NUL-terminated and is only
     // valid for the duration of this callback.
-    const std::string t(topic, topic_len);
     const std::string payload(data, data_len);
 
-    const std::string prefix = std::string("smart_home/") + m_mqtt_cfg.device_id + "/cmd/";
-    if (t.compare(0, prefix.size(), prefix) != 0) {
+    cJSON* root = cJSON_ParseWithLength(payload.c_str(), payload.size());
+    if (root == nullptr) {
+        ESP_LOGW(TAG, "Command is not valid JSON: %s", payload.c_str());
         return;
     }
-    const std::string target = t.substr(prefix.size());
 
-    ESP_LOGI(TAG, "Command '%s' -> '%s'", target.c_str(), payload.c_str());
-
-    if (target == "ota") {
-        // Only sets a flag; the OTA task does the transfer.
-        const char* url = payload.empty() ? m_mqtt_cfg.ota_url : payload.c_str();
-        if (url == nullptr || url[0] == '\0') {
-            ESP_LOGW(TAG, "OTA command with no URL and none configured");
-            return;
-        }
-        if (!m_ota_service.requestUpdate(url)) {
-            ESP_LOGW(TAG, "OTA request rejected");
-        }
-    } else if (target == "reboot") {
-        ESP_LOGW(TAG, "Reboot requested over MQTT");
-        vTaskDelay(pdMS_TO_TICKS(100));
-        esp_restart();
-    } else {
-        ESP_LOGW(TAG, "Unknown command target '%s'", target.c_str());
+    const cJSON* cmd = cJSON_GetObjectItemCaseSensitive(root, "command");
+    if (!cJSON_IsString(cmd) || cmd->valuestring == nullptr) {
+        ESP_LOGW(TAG, "Command has no 'command' field: %s", payload.c_str());
+        cJSON_Delete(root);
+        return;
     }
+
+    const std::string verb = cmd->valuestring;
+    ESP_LOGI(TAG, "Command '%s'", verb.c_str());
+
+    bool ok = true;
+
+    if (verb == "reboot") {
+        // Acknowledge before restarting, or the server never learns it landed.
+        char ack[96];
+        snprintf(ack, sizeof(ack),
+                 "{\"command\":\"reboot\",\"status\":\"ok\",\"device_id\":\"%s\"}",
+                 m_mqtt_cfg.device_id);
+        m_mqtt_service.publishResponse(ack);
+        cJSON_Delete(root);
+
+        ESP_LOGW(TAG, "Rebooting at server request");
+        vTaskDelay(pdMS_TO_TICKS(200));  // let the ack reach the broker
+        esp_restart();
+        return;
+    }
+
+    if (verb == "get_status") {
+        m_mqtt_service.publishDeviceStatus();
+    } else if (verb == "ota") {
+        // Only sets a flag; the OTA task performs the transfer, so a slow
+        // download never blocks the MQTT client.
+        const cJSON* url = cJSON_GetObjectItemCaseSensitive(root, "url");
+        const char* target =
+            (cJSON_IsString(url) && url->valuestring[0] != '\0') ? url->valuestring
+                                                                : m_mqtt_cfg.ota_url;
+        if (target == nullptr || target[0] == '\0') {
+            ESP_LOGW(TAG, "OTA command carries no URL and none is configured");
+            ok = false;
+        } else {
+            ok = m_ota_service.requestUpdate(target) || m_ota_service.isOTAInProgress();
+        }
+    } else {
+        ESP_LOGW(TAG, "Unknown command '%s'", verb.c_str());
+        ok = false;
+    }
+
+    // Built with cJSON rather than snprintf: the verb is a string we did not
+    // author, and echoing it unescaped could emit malformed JSON.
+    cJSON* ack = cJSON_CreateObject();
+    cJSON_AddStringToObject(ack, "command", verb.c_str());
+    cJSON_AddStringToObject(ack, "status", ok ? "ok" : "error");
+    cJSON_AddStringToObject(ack, "device_id", m_mqtt_cfg.device_id);
+    char* ack_text = cJSON_PrintUnformatted(ack);
+    if (ack_text != nullptr) {
+        m_mqtt_service.publishResponse(ack_text);
+        cJSON_free(ack_text);
+    }
+    cJSON_Delete(ack);
+    cJSON_Delete(root);
 }
 
 void Application::publishTelemetry() {
@@ -205,25 +251,18 @@ void Application::publishTelemetry() {
         return;
     }
 
+    // These three need no sensor hardware, so they exercise the whole path --
+    // broker, storage, database -- before Phase 3 wires up anything real.
     wifi_ap_record_t ap = {};
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%d", ap.rssi);
-        m_mqtt_service.publishState("rssi", buf);
+        m_mqtt_service.publishSensor("rssi", (float)ap.rssi, "dBm");
     }
 
-    {
-        char buf[24];
-        snprintf(buf, sizeof(buf), "%u",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-        m_mqtt_service.publishState("heap", buf);
-    }
+    m_mqtt_service.publishSensor(
+        "heap", (float)heap_caps_get_free_size(MALLOC_CAP_INTERNAL), "B");
 
-    {
-        char buf[24];
-        snprintf(buf, sizeof(buf), "%lld", (long long)(esp_timer_get_time() / 1000000));
-        m_mqtt_service.publishState("uptime", buf);
-    }
+    m_mqtt_service.publishSensor(
+        "uptime", (float)(esp_timer_get_time() / 1000000), "s");
 }
 
 void Application::run() {

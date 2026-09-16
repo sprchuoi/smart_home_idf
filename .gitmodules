@@ -4,3 +4,6 @@
 [submodule "open_wake_work"]
 	path = open_wake_work
 	url = https://github.com/sprchuoi/openWakeWord.git
+[submodule "Smart_Server"]
+	path = Smart_Server
+	url = https://github.com/sprchuoi/Smart_Server.git

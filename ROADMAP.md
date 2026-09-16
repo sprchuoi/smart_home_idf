@@ -387,7 +387,8 @@ only ESP32/S2).
 
 | # | Question | Notes |
 |---|---|---|
-| 1 | EventBus: keep the shrunk 3.8 KB version, or delete it? | It now has producers but **no consumers**. The topology is a DAG (WiFi → MQTT → {publish, command → OTA}), not a bus, and every edge is single-listener. Callbacks would close the dangling-pointer class by construction. Decide in Phase 2 when MQTT gets wired. |
+| 0 | **How does Google Home reach the server's data?** | The plan assumed Home Assistant + a Matter bridge add-on. The hub is actually `Smart_Server` — a FastAPI stack with its own bridge, database and REST API — which does **not** run Home Assistant. So the Matter hop is unbuilt and the route is open: add HA alongside Smart_Server and bridge from there, or put a Matter bridge directly in front of the server. This blocks Phase 4 and nothing else. |
+| 1 | ~~EventBus: keep or delete?~~ | **Resolved** — deleted. Replaced with direct callbacks; the topology is a DAG with one listener per edge. |
 | 2 | `OledDisplay`: keep or delete? | `renderUpdate()` only logs — no framebuffer, no font. `writeData()` contains a `vTaskDelete(nullptr)`, which deletes the *calling* task. Defaults to I2C pins 21/22, which happen to be valid on S3. It is a skeleton, not a display driver. |
 | 3 | `PowerManager`: keep or delete? | `MODEM_SLEEP` is a stub; `LIGHT_SLEEP` can sleep indefinitely on a zero-length timer; wake source is GPIO0, a strapping pin. Only worth keeping if nodes run on battery — WiFi nodes generally will not. |
 | 4 | `WatchdogSupervisor`: keep or delete? | `initialize()` never calls `esp_task_wdt_init()`, so the "30 s timeout" is fiction. `feedWatchdog(task)` calls `esp_task_wdt_reset()`, which resets **the calling task only** — so feeding "on behalf of" another task is meaningless. IDF's TWDT does this correctly on its own. |

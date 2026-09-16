@@ -60,22 +60,38 @@ public:
     bool isConnected() const { return m_connected.load(std::memory_order_relaxed); }
 
     /**
-     * @brief Publish one telemetry value: QoS 0, not retained.
+     * @brief Publish one sensor reading: QoS 0, not retained.
      *
-     * A stale temperature reading has no value, and QoS 1 telemetry on a node
-     * whose broker is down just fills the outbox.
+     * Goes to smart_home/devices/<id>/sensor/<channel> as
+     * {"value": <n>, "unit": "<unit>"}, which is the shape Smart_Server's
+     * MQTT bridge stores.
+     *
+     * A stale reading has no value, and QoS 1 telemetry on a node whose broker
+     * is unreachable just fills the outbox.
      */
-    bool publishState(const char* channel, const char* value);
+    bool publishSensor(const char* channel, float value, const char* unit);
 
     /**
      * @brief Publish the device status document: QoS 1, retained.
+     *
+     * The payload must carry "status" and may carry "device_type", "name",
+     * "firmware_version", "ip" and "rssi" -- those are the fields the server
+     * reads to register and update a device.
      */
     bool publishStatus(const char* json);
 
     /**
-     * @brief Publish availability: QoS 1, retained.
+     * @brief Acknowledge a command: QoS 1, not retained.
      */
-    bool publishAvailability(bool online);
+    bool publishResponse(const char* json);
+
+    /**
+     * @brief Build and publish the retained status document.
+     *
+     * Sent automatically on connect; also served on demand so the server can
+     * ask for it with a "get_status" command.
+     */
+    void publishDeviceStatus();
 
     void stop();
 
@@ -86,7 +102,6 @@ private:
 
     void taskLoop();
     void onConnected();
-    void publishDiscovery();
     bool publish(const char* topic, const char* payload, int qos, int retain);
     std::string topicFor(const char* suffix) const;
 
@@ -98,13 +113,18 @@ private:
     int m_backoff_ms = 2000;
 
     MqttConfigInfo_st m_cfg{};
-    std::string m_availability_topic;
-    std::string m_status_topic;
-    std::string m_command_topic;
+    std::string m_status_topic;    // smart_home/devices/<id>/status
+    std::string m_command_topic;   // smart_home/devices/<id>/command
+    std::string m_response_topic;  // smart_home/devices/<id>/response
+    std::string m_sensor_prefix;   // smart_home/devices/<id>/sensor/
     MqttCommandCallback m_command_cb;
 
     static const char* TAG;
-    static constexpr const char* TOPIC_PREFIX = "smart_home";
+
+    // Topic layout is dictated by Smart_Server's MQTT bridge, which parses
+    // topics positionally: parts[2] is the device id and parts[3] the message
+    // type. The "devices" segment is therefore load-bearing, not decoration.
+    static constexpr const char* TOPIC_PREFIX = "smart_home/devices";
     static constexpr int TASK_STACK_SIZE = 4096;
     static constexpr int TASK_PRIORITY = 5;
     static constexpr BaseType_t TASK_CORE = 0;  // networking lives on Core 0
