@@ -128,8 +128,8 @@ No code. Confirm ground truth before trusting the partition layout.
 
 ### Still outstanding in Phase 1
 
-- [ ] `debug.sh` hardcodes `xtensa-esp32-elf-gdb`; needs `xtensa-esp32s3-elf-gdb`, or just use
-      `idf.py gdb`.
+- [x] `debug.sh` now resolves GDB from the configured target (`xtensa-esp32s3-elf-gdb`) instead
+      of hardcoding `xtensa-esp32-elf-gdb`, which cannot debug an S3.
 - [ ] **Hardware verification — nothing has run on a board yet.** See the checklist at the end.
       This is the gate on declaring Phase 1 finished.
 - [ ] Host-side unit tests via IDF's `linux` preview target (`PREVIEW_TARGETS` in
