@@ -14,7 +14,7 @@ Legend: `[x]` done · `[~]` in progress · `[ ]` todo · `[!]` blocked · `?` ne
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Prerequisites & hardware ground truth | `[ ]` not started |
-| 1 | Retarget to ESP32-S3, clear dead weight | `[~]` **build green; CI + hardware verification outstanding** |
+| 1 | Retarget to ESP32-S3, clear dead weight | `[~]` **build + CI green; hardware verification outstanding** |
 | 2 | MQTT + Home Assistant | `[ ]` not started |
 | 3 | Sensors | `[ ]` not started |
 | 4 | Google Home via Matter bridge | `[ ]` not started |
@@ -99,25 +99,45 @@ No code. Confirm ground truth before trusting the partition layout.
 - [x] Removed the commented-out service graveyard from `Application.cpp`; replaced with an
       honest "not yet enabled, and why" block.
 
+### CI & tooling — DONE
+
+- [x] CI de-lied. The 9 `\\` continuations (and several `\"`) are gone; the YAML parses and the
+      steps actually run. Static analysis uses `continue-on-error` instead of `|| true`, so
+      findings are visible rather than swallowed.
+- [x] Target corrected to `esp32s3`; `IDF_VERSION` was self-contradictory (v5.2 in env vs v5.5
+      in the action input) — now v5.5.1 throughout.
+- [x] QEMU job deleted, and removed from the `needs` of the report and release jobs. It could
+      never pass: `qemu-system-xtensa` cannot emulate an S3, *and* it grepped for a log string
+      that `LOG_MAXIMUM_LEVEL=WARN` had compiled out of the binary.
+- [x] Docs build dropped from CI — `docs.yml` already does it and deploys to Pages.
+- [x] Actions pinned forward (`checkout@v4`, `action-gh-release@v2`); old pins were Node 16.
+- [x] `make.sh` target corrected; QEMU replaced by **`./make.sh smoke`**, which checks target,
+      flash size, octal PSRAM, log level, and the presence of `otadata`/`ota_0`/`ota_1`.
+      Verified these fail against the previous configuration.
+- [x] `./make.sh ci` runs the smoke gate as a real failing step.
+- [x] `run_static_analysis` creates `$TEST_DIR`; previously only `setup_environment` did, so
+      `./make.sh test` on a fresh clone could not write its report.
+- [x] **Credentials no longer baked in.** `main/Kconfig`'s `CONFIG_WIFI_SSID`/`_PASSWORD` are
+      gone; provisioning is NVS-only via `wifi_set <ssid> <password>`.
+- [x] `main/sdkconfig.defaults` (orphaned, held placeholder credentials) removed.
+- [x] `Application_cfg.hpp`'s `idle_core_mask` type confusion documented and defused.
+
+> `main/Kconfig` and `main/app/cfg/Application_cfg.hpp` were **emptied rather than deleted** —
+> file removal needs explicit user confirmation. Both now contain only a tombstone explaining
+> why they are empty. They are safe to delete.
+
 ### Still outstanding in Phase 1
 
-- [ ] **CI is still broken and silently green.** `.github/workflows/ci.yml` has 9 literal `\\`
-      line-continuations inside `run: |` blocks (lines 80-84, 174-177). Each ends in `|| true`,
-      so the pipeline reports success while running nothing. Also needs `target: esp32s3`.
-- [ ] **Delete the QEMU job.** `qemu-system-xtensa` cannot emulate an S3, and the job passes on
-      failure. Replace with a real `idf.py size` assertion.
-- [ ] `make.sh:44` hardcodes `ESP32_TARGET="esp32"`; the QEMU path at lines 395-399 too.
-- [ ] `main/app/cfg/Application_cfg.hpp` — `idle_core_mask = CONFIG_ESP_MAIN_TASK_AFFINITY` is
-      a type confusion (affinity selector where a core bitmask belongs). With the default it
-      evaluates to `0x0`, i.e. **no idle task monitored**. Should be `0x3`.
-- [ ] `main/Kconfig` bakes `CONFIG_WIFI_SSID`/`CONFIG_WIFI_PASSWORD` into the firmware image —
-      exactly what NVS provisioning exists to avoid. Remove.
-- [ ] `main/sdkconfig.defaults` is now orphaned (root file is authoritative) and holds
-      placeholder credentials. Remove.
-- [ ] `debug.sh` hardcodes `xtensa-esp32-elf-gdb`; needs `xtensa-esp32s3-elf-gdb` or `idf.py gdb`.
+- [ ] `debug.sh` hardcodes `xtensa-esp32-elf-gdb`; needs `xtensa-esp32s3-elf-gdb`, or just use
+      `idf.py gdb`.
 - [ ] **Hardware verification — nothing has run on a board yet.** See the checklist at the end.
-- [ ] Establish a real test foundation: host-side unit tests via IDF's `linux` preview target
-      (`PREVIEW_TARGETS` in `tools/idf_py_actions/constants.py`), so CI does something true.
+      This is the gate on declaring Phase 1 finished.
+- [ ] Host-side unit tests via IDF's `linux` preview target (`PREVIEW_TARGETS` in
+      `tools/idf_py_actions/constants.py`). `smoke_test` covers build-level regressions but
+      there is still no test for pure logic — HA discovery payloads, topic formatting, sensor
+      conversion. A test that publishes an event with a short-lived payload and asserts the
+      consumer sees the right bytes would lock in the EventBus fix.
+- [ ] Decide the four **Open decisions** below (EventBus keep/delete is cheapest to settle now).
 
 **Exit criteria:** board boots on S3, joins WiFi from NVS credentials, reports its IP, and the
 boot heap reflects the EventBus saving.
