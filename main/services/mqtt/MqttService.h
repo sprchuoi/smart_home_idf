@@ -1,113 +1,113 @@
 /**
  * @file MqttService.h
- * @brief MQTT Service (Core 0)
- * 
- * Async MQTT client using esp-mqtt.
- * Runs in dedicated FreeRTOS task pinned to Core 0.
+ * @brief MQTT client for Home Assistant
+ *
+ * Runs on Core 0. Publishes availability, status and per-channel telemetry,
+ * announces itself to Home Assistant via MQTT discovery, and dispatches
+ * commands to a registered callback.
+ *
+ * Reconnect policy: esp-mqtt's built-in auto-reconnect is a *fixed* 10 s with
+ * no backoff (MQTT_RECON_DEFAULT_MS in mqtt_client.c), so it is disabled and
+ * this service owns the loop. It retries with exponential backoff and jitter,
+ * capped at 60 s.
  */
 
 #pragma once
 
-#include "core/eventbus/EventBus.h"
+#include "cfg/Mqtt_cfg.hpp"
 #include "mqtt_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <atomic>
+#include <cstddef>
+#include <functional>
 #include <string>
 
 /**
- * @brief MQTT Service
- * 
- * Async MQTT client with auto-reconnect
- * Publishes MQTT events to EventBus
+ * @brief Command callback.
+ *
+ * Invoked from the esp-mqtt task. `topic` and `data` point into esp-mqtt's own
+ * buffer: they are NOT NUL-terminated and are valid only for the duration of
+ * the call. Copy anything you intend to keep, and do not call esp-mqtt APIs
+ * other than publish/subscribe from inside it.
  */
+using MqttCommandCallback = std::function<void(const char* topic, size_t topic_len,
+                                               const char* data, size_t data_len)>;
+
 class MqttService {
 public:
     MqttService();
     ~MqttService();
-    
+
     /**
-     * @brief Initialize MQTT service
-     * @param broker_uri MQTT broker URI (e.g., "mqtt://192.168.1.100:1883")
-     * @param client_id Client ID
-     * @return true on success
+     * @brief Configure the client. Does not connect.
      */
-    bool initialize(const char* broker_uri, const char* client_id);
-    
+    bool initialize(const MqttConfigInfo_st* cfg);
+
+    void setCommandCallback(MqttCommandCallback cb) { m_command_cb = std::move(cb); }
+
     /**
-     * @brief Connect to MQTT broker
-     * @return true on success
+     * @brief Begin connecting. Call once WiFi has an address. Idempotent.
      */
-    bool connect();
-    
+    void start();
+
     /**
-     * @brief Disconnect from MQTT broker
+     * @brief Drop the connection so the broker publishes our Last Will now,
+     *        rather than waiting out the keepalive (up to 45 s).
      */
-    void disconnect();
-    
+    void notifyWifiDown();
+
+    bool isConnected() const { return m_connected.load(std::memory_order_relaxed); }
+
     /**
-     * @brief Check if connected
-     * @return true if connected
+     * @brief Publish one telemetry value: QoS 0, not retained.
+     *
+     * A stale temperature reading has no value, and QoS 1 telemetry on a node
+     * whose broker is down just fills the outbox.
      */
-    bool isConnected() const { return m_connected; }
-    
+    bool publishState(const char* channel, const char* value);
+
     /**
-     * @brief Get task handle (for watchdog)
+     * @brief Publish the device status document: QoS 1, retained.
      */
-    TaskHandle_t getTaskHandle() const { return m_task_handle; }
-    
+    bool publishStatus(const char* json);
+
     /**
-     * @brief Publish message (QoS 0 only for Home Assistant)
-     * @param topic Topic string
-     * @param data Data payload
-     * @param data_len Data length
-     * @return true on success
+     * @brief Publish availability: QoS 1, retained.
      */
-    bool publish(const char* topic, const char* data, size_t data_len);
-    
-    /**
-     * @brief Publish Home Assistant auto-discovery message
-     * @param device_name Device name
-     * @param device_id Device unique ID
-     * @return true on success
-     */
-    bool publishHADiscovery(const char* device_name, const char* device_id);
-    
-    /**
-     * @brief Subscribe to topic
-     * @param topic Topic string
-     * @param qos QoS level (0-2)
-     * @return true on success
-     */
-    bool subscribe(const char* topic, int qos = 1);
-    
-    /**
-     * @brief Stop MQTT service
-     */
+    bool publishAvailability(bool online);
+
     void stop();
-    
-    /**
-     * @brief FreeRTOS task entry point
-     */
-    static void taskEntry(void* parameter);
 
 private:
+    static void taskEntry(void* parameter);
+    static void eventHandler(void* handler_args, esp_event_base_t base,
+                             int32_t event_id, void* event_data);
+
     void taskLoop();
-    void publishEvent(EventType type, const EventPayload& payload = {});
-    
-    // MQTT event handler
-    static void mqttEventHandler(void* handler_args, esp_event_base_t base,
-                                 int32_t event_id, void* event_data);
-    
-    esp_mqtt_client_handle_t m_client;
-    TaskHandle_t m_task_handle;
-    bool m_initialized;
-    bool m_connected;
-    std::string m_broker_uri;
-    std::string m_client_id;
-    
+    void onConnected();
+    void publishDiscovery();
+    bool publish(const char* topic, const char* payload, int qos, int retain);
+    std::string topicFor(const char* suffix) const;
+
+    esp_mqtt_client_handle_t m_client = nullptr;
+    TaskHandle_t m_task = nullptr;
+    std::atomic<bool> m_connected{false};
+    std::atomic<bool> m_stopping{false};
+    bool m_started = false;
+    int m_backoff_ms = 2000;
+
+    MqttConfigInfo_st m_cfg{};
+    std::string m_availability_topic;
+    std::string m_status_topic;
+    std::string m_command_topic;
+    MqttCommandCallback m_command_cb;
+
     static const char* TAG;
+    static constexpr const char* TOPIC_PREFIX = "smart_home";
     static constexpr int TASK_STACK_SIZE = 4096;
     static constexpr int TASK_PRIORITY = 5;
-    static constexpr BaseType_t TASK_CORE = 0;  // Core 0
+    static constexpr BaseType_t TASK_CORE = 0;  // networking lives on Core 0
+    static constexpr int INITIAL_BACKOFF_MS = 2000;
+    static constexpr int MAX_BACKOFF_MS = 60000;
 };
-

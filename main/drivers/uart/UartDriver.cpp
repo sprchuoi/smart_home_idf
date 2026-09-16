@@ -161,11 +161,9 @@ void UartDriver::taskLoop()
             case UART_DATA: {
                 size_t len = read(buffer, UART_RX_BUF_SIZE, 0);
                 if (len > 0) {
-                    // Received bytes are variable-length and deliberately do not
-                    // travel through the EventBus, whose payload is a
-                    // fixed-size union. A 1 KB inline buffer there would make
-                    // every queued event 1 KB, which is what the payload used
-                    // to do. Deliver to a consumer directly instead.
+                    // Received bytes are variable-length, so they go straight to
+                    // the log rather than through any fixed-size message type.
+                    // If a consumer ever needs these, hand them over directly.
                     ESP_LOGI(TAG, "RX %u bytes: %.*s",
                              (unsigned)len, (int)len, (const char*)buffer);
                 }

@@ -2,33 +2,34 @@ idf_component_register(
     SRCS
         "main.cpp"
         "app/src/Application.cpp"
-        "core/eventbus/EventBus.cpp"
         "core/statemachine/AppStateMachine.cpp"
-        "core/powermanager/PowerManager.cpp"
-        "core/watchdog/WatchdogSupervisor.cpp"
         "services/wifi/WifiService.cpp"
         "services/wifi/WifiConfigInterface.cpp"
         "services/mqtt/MqttService.cpp"
+        "services/mqtt/MqttConfigInterface.cpp"
         "services/ota/OTAService.cpp"
-        "drivers/oled/OledDisplay.cpp"
         "drivers/uart/UartDriver.cpp"
         "error/ErrorHandler.cpp"
-    INCLUDE_DIRS 
+    INCLUDE_DIRS
         "."
         "app"
         "core"
         "services"
         "drivers"
         "error"
-    REQUIRES 
+    REQUIRES
         nvs_flash
         esp_wifi
         esp_netif
         esp_event
         mqtt
-        driver
-        esp_timer
         esp_https_ota
+        esp_http_client
+        esp_app_format
+        esp_timer
         esp_system
+        esp_driver_uart
+        esp_driver_gpio
+        json
         console
 )

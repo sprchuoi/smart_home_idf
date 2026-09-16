@@ -5,26 +5,26 @@
 
 #include "app/src/Application.h"
 
-#include <string>
+#include <cstdio>
 #include <cstring>
+#include <string>
+
 #include "nvs_flash.h"
 #include "esp_console.h"
-#include "driver/uart.h"
+#include "esp_heap_caps.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_wifi.h"
 #include "linenoise/linenoise.h"
 
-
 namespace {
-// How often run() logs its liveness line.
-constexpr uint32_t APP_STATUS_INTERVAL_MS = 2000;
+// How often run() publishes link diagnostics and logs a heartbeat.
+constexpr uint32_t TELEMETRY_INTERVAL_MS = 30000;
 }  // namespace
 
 const char* Application::TAG = "Application";
 
-Application::Application()
-    : m_initialized(false)
-    , m_running(false) 
-    { // Initialize pointer to nullptr
-}
+Application::Application() = default;
 
 Application::~Application() {
     stop();
@@ -34,90 +34,96 @@ bool Application::initialize() {
     if (m_initialized) {
         return true;
     }
-    
+
     ESP_LOGI(TAG, "Initializing Smart Home Application...");
-    
-    // Initialize ESP Console
-    esp_console_repl_t *repl = NULL;
+
+    // --- Console -------------------------------------------------------------
+    esp_console_repl_t* repl = nullptr;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_config.prompt = "esp32>";
     repl_config.max_cmdline_length = 256;
-    
+
     esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
-    
-    ESP_LOGI(TAG, "Console initialized");
-    
-    // Initialize NVS
+
+    // --- NVS -----------------------------------------------------------------
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_LOGW(TAG, "NVS partition was truncated and needs to be erased");
+        ESP_LOGW(TAG, "NVS partition truncated; erasing and retrying");
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
-    
-    // Initialize EventBus
-    if (!EventBus::getInstance().initialize()) {
-        ESP_LOGE(TAG, "Failed to initialize EventBus");
-        return false;
-    }
-    
-    // Initialize WiFi Config Interface (combines config and provisioning)
+
+    // --- Config stores -------------------------------------------------------
     if (!WifiConfigInterface::getInstance().initialize()) {
         ESP_LOGE(TAG, "Failed to initialize WifiConfigInterface");
         return false;
     }
+    if (!MqttConfigInterface::getInstance().initialize()) {
+        ESP_LOGE(TAG, "Failed to initialize MqttConfigInterface");
+        return false;
+    }
 
-    // --- WiFi ---------------------------------------------------------------
-    // Credentials come from NVS, provisioned at runtime over the console:
-    //     esp32> wifi_set <ssid> <password>
-    // A device with no credentials boots to a usable console instead of
-    // retrying forever.
+    // --- WiFi ----------------------------------------------------------------
+    // Credentials live in NVS, provisioned at runtime over the console. A node
+    // with none boots to a usable console instead of retrying forever.
     if (!WifiConfigInterface::getInstance().hasCredentials(&m_wifi_cfg)) {
-        ESP_LOGW(TAG, "No WiFi credentials configured.");
-        ESP_LOGW(TAG, "Provision over the console, then reboot:");
+        ESP_LOGW(TAG, "No WiFi credentials. Provision, then reboot:");
         ESP_LOGW(TAG, "  wifi_set <ssid> <password>");
     } else if (!m_wifi_service.initialize(&m_wifi_cfg)) {
         ESP_LOGE(TAG, "Failed to initialize WifiService");
         return false;
-    } else if (!m_wifi_service.connect()) {
-        // WifiService::initialize() only configures the driver -- esp_wifi_start()
-        // lives in connect(). That call was missing entirely, so the radio never
-        // came up, no WIFI_CONNECTED event was ever published, and everything
-        // downstream (state machine, MQTT) silently never ran.
-        ESP_LOGE(TAG, "Failed to start WiFi");
+    } else {
+        m_wifi_service.setEventCallback(
+            [this](const WifiQueueEvent& e) { onWifiEvent(e); });
+        m_state_machine.setState(AppState::WIFI_CONNECTING);
+        if (!m_wifi_service.connect()) {
+            // WifiService::initialize() only configures the driver --
+            // esp_wifi_start() lives in connect().
+            ESP_LOGE(TAG, "Failed to start WiFi");
+            return false;
+        }
+    }
+
+    // --- MQTT ----------------------------------------------------------------
+    if (!MqttConfigInterface::getInstance().hasConfig(&m_mqtt_cfg)) {
+        ESP_LOGW(TAG, "MQTT not provisioned. Provision, then reboot:");
+        ESP_LOGW(TAG, "  mqtt_set <host> [port]");
+        ESP_LOGW(TAG, "  mqtt_device <device_id> <name> [room]");
+    } else if (!m_mqtt_service.initialize(&m_mqtt_cfg)) {
+        ESP_LOGE(TAG, "Failed to initialize MqttService");
         return false;
     } else {
-        ESP_LOGI(TAG, "WiFi started, awaiting connection");
+        m_mqtt_service.setCommandCallback(
+            [this](const char* t, size_t tl, const char* d, size_t dl) {
+                onMqttCommand(t, tl, d, dl);
+            });
+        // Not started here -- it waits for an IP address, in onWifiEvent().
     }
-     
-    // --- Not yet enabled ----------------------------------------------------
-    // These services are compiled but deliberately left off until a later phase,
-    // listed here so the gap is visible rather than looking like working config:
-    //
-    //   AppStateMachine    event graph is unreachable -- WIFI_STARTED and
-    //                      WIFI_GOT_IP are never published by anything, so it
-    //                      would sit in INIT forever.
-    //   MqttService        needs broker identity from NVS, not a hardcoded URI.
-    //   WatchdogSupervisor initialize() never calls esp_task_wdt_init(), so the
-    //                      configured 30 s timeout is fiction today.
-    //   OTAService         written against esp_https_ota() without ever holding
-    //                      a handle, so its success path is dead code.
-    //   OledDisplay        render path is a stub -- no framebuffer, no font.
-    //   PowerManager       MODEM_SLEEP is unimplemented and LIGHT_SLEEP can sleep
-    //                      indefinitely on a zero-length timer.
-    //
-    // UartDriver is off by design: the ESP console already owns UART0.
-    // AudioPipeline, AudioStateMachine and WakeWordService were removed -- they
-    // were scaffolding with no working wake-word model behind them, and
-    // AudioPipeline does not compile for the ESP32-S3 at all.
-    
-    // Note: Watchdog tasks will be registered in start() after all services are fully running
+
+    // --- OTA -----------------------------------------------------------------
+    if (!m_ota_service.initialize()) {
+        ESP_LOGW(TAG, "Failed to initialize OTAService (continuing)");
+    } else {
+        m_ota_service.setProgressCallback([this](int percent) {
+            if (!m_mqtt_service.isConnected()) {
+                return;
+            }
+            char status[48];
+            snprintf(status, sizeof(status), "{\"ota\":%d}", percent);
+            m_mqtt_service.publishStatus(status);
+        });
+    }
+
+    // UartDriver is deliberately not started: it defaults to UART0, which the
+    // console REPL above already owns, and its stop() is unguarded (it would
+    // delete the console's driver and double-free its queue). Point it at
+    // UART1 with explicit ESP32-S3 pins before enabling it.
 
     m_initialized = true;
-    ESP_LOGI(TAG, "Application initialized successfully");
+    ESP_LOGI(TAG, "Initialized. state=%s", m_state_machine.getStateString());
     return true;
 }
 
@@ -126,47 +132,119 @@ bool Application::start() {
         ESP_LOGE(TAG, "Application not initialized");
         return false;
     }
-    
     if (m_running) {
         return true;
     }
-    
-    ESP_LOGI(TAG, "Starting application...");
-
-    // UartDriver is deliberately neither started nor stopped here.
-    // It defaults to UART0, which the esp_console REPL already owns, so start()
-    // would fail anyway -- and its stop() is unguarded: it calls
-    // uart_driver_delete(UART_NUM_0) against the console's driver and then
-    // double-frees the event queue that uart_driver_delete already released.
-    // Point it at UART1 with explicit ESP32-S3 pins before enabling it.
-    //
-    // Watchdog registration is likewise skipped: WatchdogSupervisor::initialize()
-    // never calls esp_task_wdt_init(), so registerTask() early-returns and
-    // listing tasks here would imply supervision that is not happening.
-
     m_running = true;
     ESP_LOGI(TAG, "Application started");
     return true;
 }
 
-void Application::run() {
-    if (!m_running) {
-        if (!start()) {
-            ESP_LOGE(TAG, "Failed to start application");
+void Application::onWifiEvent(const WifiQueueEvent& event) {
+    switch (event.type) {
+        case WifiEventType::STA_START:
+            ESP_LOGI(TAG, "WiFi station started");
+            m_state_machine.setState(AppState::WIFI_CONNECTING);
+            break;
+
+        case WifiEventType::GOT_IP: {
+            char ip[16] = {};
+            esp_ip4addr_ntoa(reinterpret_cast<const esp_ip4_addr_t*>(&event.ip_addr), ip, sizeof(ip));
+            ESP_LOGI(TAG, "Got IP %s", ip);
+            m_state_machine.setState(AppState::MQTT_CONNECTING);
+            m_mqtt_service.start();
+            break;
+        }
+
+        case WifiEventType::DISCONNECTED:
+            ESP_LOGW(TAG, "WiFi disconnected (reason %u)", (unsigned)event.reason);
+            m_state_machine.setState(AppState::WIFI_CONNECTING);
+            // Drop the broker connection now so the Last Will fires promptly
+            // instead of waiting out the 45 s keepalive.
+            m_mqtt_service.notifyWifiDown();
+            break;
+    }
+}
+
+void Application::onMqttCommand(const char* topic, size_t topic_len,
+                                const char* data, size_t data_len) {
+    // Copy out of esp-mqtt's buffer -- it is not NUL-terminated and is only
+    // valid for the duration of this callback.
+    const std::string t(topic, topic_len);
+    const std::string payload(data, data_len);
+
+    const std::string prefix = std::string("smart_home/") + m_mqtt_cfg.device_id + "/cmd/";
+    if (t.compare(0, prefix.size(), prefix) != 0) {
+        return;
+    }
+    const std::string target = t.substr(prefix.size());
+
+    ESP_LOGI(TAG, "Command '%s' -> '%s'", target.c_str(), payload.c_str());
+
+    if (target == "ota") {
+        // Only sets a flag; the OTA task does the transfer.
+        const char* url = payload.empty() ? m_mqtt_cfg.ota_url : payload.c_str();
+        if (url == nullptr || url[0] == '\0') {
+            ESP_LOGW(TAG, "OTA command with no URL and none configured");
             return;
         }
+        if (!m_ota_service.requestUpdate(url)) {
+            ESP_LOGW(TAG, "OTA request rejected");
+        }
+    } else if (target == "reboot") {
+        ESP_LOGW(TAG, "Reboot requested over MQTT");
+        vTaskDelay(pdMS_TO_TICKS(100));
+        esp_restart();
+    } else {
+        ESP_LOGW(TAG, "Unknown command target '%s'", target.c_str());
     }
-    
+}
+
+void Application::publishTelemetry() {
+    if (!m_mqtt_service.isConnected()) {
+        return;
+    }
+
+    wifi_ap_record_t ap = {};
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d", ap.rssi);
+        m_mqtt_service.publishState("rssi", buf);
+    }
+
+    {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%u",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        m_mqtt_service.publishState("heap", buf);
+    }
+
+    {
+        char buf[24];
+        snprintf(buf, sizeof(buf), "%lld", (long long)(esp_timer_get_time() / 1000000));
+        m_mqtt_service.publishState("uptime", buf);
+    }
+}
+
+void Application::run() {
+    if (!m_running && !start()) {
+        ESP_LOGE(TAG, "Failed to start application");
+        return;
+    }
+
     ESP_LOGI(TAG, "Application running...");
 
-    // Status heartbeat. There is no display yet -- OledDisplay's render path is
-    // a stub and it is not initialized -- so this exists to prove the scheduler
-    // is alive and to surface link state at a glance over serial.
+    if (m_mqtt_service.isConnected()) {
+        m_state_machine.setState(AppState::RUNNING);
+    }
+
     while (m_running) {
-        ESP_LOGI(TAG, "alive | wifi:%s | ip:%s",
+        ESP_LOGI(TAG, "alive | state:%s | wifi:%s | mqtt:%s",
+                 m_state_machine.getStateString(),
                  m_wifi_service.isConnected() ? "up" : "down",
-                 m_wifi_service.getIPAddress().c_str());
-        vTaskDelay(pdMS_TO_TICKS(APP_STATUS_INTERVAL_MS));
+                 m_mqtt_service.isConnected() ? "up" : "down");
+        publishTelemetry();
+        vTaskDelay(pdMS_TO_TICKS(TELEMETRY_INTERVAL_MS));
     }
 }
 
@@ -174,38 +252,16 @@ void Application::stop() {
     if (!m_running) {
         return;
     }
-    
     ESP_LOGI(TAG, "Stopping application...");
-    
     m_running = false;
-    
-    // m_uart_driver.stop() is intentionally absent -- see start() for why.
+
+    // m_uart_driver.stop() is intentionally absent -- see initialize().
     m_ota_service.stop();
     m_mqtt_service.stop();
     m_wifi_service.stop();
-    m_display.stop();
-    m_state_machine.stop();
-    m_power_manager.stop();
-    m_watchdog.stop();
-    
+
+    MqttConfigInterface::getInstance().deinitialize();
     WifiConfigInterface::getInstance().deinitialize();
-    EventBus::getInstance().deinitialize();
-    
+
     ESP_LOGI(TAG, "Application stopped");
 }
-
-// NOTE: this is currently unreachable -- nothing publishes STATE_CHANGED and
-// AppStateMachine is never initialized. It is kept because it is the intended
-// hook for bringing MQTT up once WiFi connects. Do not assume it runs.
-void Application::handleStateChange(const EventMessage& event) {
-    ESP_LOGI(TAG, "State changed: %s", event.payload.state_info.text);
-
-    // Handle MQTT connection when WiFi is connected
-    if (m_state_machine.getState() == AppState::WIFI_CONNECTED) {
-        if (!m_mqtt_service.isConnected()) {
-            ESP_LOGI(TAG, "Attempting MQTT connection...");
-            m_mqtt_service.connect();
-        }
-    }
-}
-

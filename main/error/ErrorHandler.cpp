@@ -4,13 +4,27 @@
  */
 
 #include "ErrorHandler.h"
+#include "esp_log.h"
 #include <cstdarg>
+#include <cstdio>
 
 const char* ErrorHandler::TAG = "ErrorHandler";
 
 ErrorHandler& ErrorHandler::getInstance() {
     static ErrorHandler instance;
     return instance;
+}
+
+const char* ErrorHandler::categoryName(ErrorCategory category) {
+    switch (category) {
+        case ErrorCategory::WIFI_ERROR:   return "WIFI";
+        case ErrorCategory::MQTT_ERROR:   return "MQTT";
+        case ErrorCategory::SYSTEM_ERROR: return "SYSTEM";
+        case ErrorCategory::NVS_ERROR:    return "NVS";
+        case ErrorCategory::OTA_ERROR:    return "OTA";
+        case ErrorCategory::UART_ERROR:   return "UART";
+    }
+    return "UNKNOWN";
 }
 
 void ErrorHandler::reportError(ErrorCategory category,
@@ -25,20 +39,19 @@ void ErrorHandler::reportError(ErrorCategory category,
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
 
-    ESP_LOGE(TAG, "[%d] Error %d: %s",
-             static_cast<int>(category),
+    ++m_error_count;
+    const size_t idx = static_cast<size_t>(category);
+    if (idx < CATEGORY_COUNT) {
+        ++m_category_counts[idx];
+    }
+
+    ESP_LOGE(TAG, "[%s] error %d: %s",
+             categoryName(category),
              error_code,
              buffer);
+}
 
-    EventMessage event{};
-    event.type = EventType::SYSTEM_ERROR;
-    event.source = EventSource::ERROR_HANDLER;
-    event.destination = EventSource::APPLICATION;
-    event.payload.error_info.error_code = error_code;
-
-    strncpy(event.payload.error_info.error_msg,
-            buffer,
-            sizeof(event.payload.error_info.error_msg) - 1);
-
-    EventBus::getInstance().publish(event);
+uint32_t ErrorHandler::getErrorCount(ErrorCategory category) const {
+    const size_t idx = static_cast<size_t>(category);
+    return (idx < CATEGORY_COUNT) ? m_category_counts[idx] : 0;
 }
