@@ -10,14 +10,11 @@
 
 #include "core/eventbus/EventBus.h"
 #include "core/statemachine/AppStateMachine.h"
-#include "core/audio/AudioStateMachine.h"
 #include "core/powermanager/PowerManager.h"
 #include "core/watchdog/WatchdogSupervisor.h"
 #include "services/wifi/WifiService.h"
 #include "services/wifi/WifiConfigInterface.h"
 #include "services/mqtt/MqttService.h"
-#include "services/wakeup/WakeWordService.h"
-#include "services/audio/AudioPipeline.h"
 #include "services/ota/OTAService.h"
 #include "drivers/oled/OledDisplay.h"
 #include "drivers/uart/UartDriver.h"
@@ -58,19 +55,14 @@ public:
 
 private:
 
-    void setupEventSubscriptions();
     void handleStateChange(const EventMessage& event);
-    void handleWakeWord(const EventMessage& event);
-    
+
     WifiService m_wifi_service;
     MqttService m_mqtt_service;
-    WakeWordService m_wake_word_service;
-    AudioPipeline m_audio_pipeline;
     OTAService m_ota_service;
     OledDisplay m_display;
     UartDriver m_uart_driver;
     AppStateMachine m_state_machine;
-    AudioStateMachine m_audio_state_machine;
     PowerManager m_power_manager;
     WatchdogSupervisor m_watchdog;
     

@@ -1,0 +1,59 @@
+# ESP32-S3 Smart Home — build defaults
+#
+# Placed at the project root because that is where ESP-IDF picks it up
+# automatically. Previously this file lived in main/ and was referenced by
+# main/CMakeLists.txt, while CI wrote its own copy to the repo root — so the
+# two disagreed and neither was tracked in git.
+
+# --- Target -----------------------------------------------------------------
+# The firmware previously built for classic ESP32 (2 MB flash, no PSRAM).
+CONFIG_IDF_TARGET="esp32s3"
+
+# --- Flash ------------------------------------------------------------------
+# ESP32-S3-DevKitC-1 N16R8 has 16 MB.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# --- PSRAM ------------------------------------------------------------------
+# The N16R8 carries an ESP32-S3R8: 8 MB *octal* PSRAM.
+#
+# CONFIG_SPIRAM_MODE_QUAD is the Kconfig default, so OCT must be set
+# explicitly — a wrong mode here produces a boot loop rather than a build
+# error.
+#
+# 80 MHz is deliberate: Octal PSRAM at 120 MHz requires
+# CONFIG_IDF_EXPERIMENTAL_FEATURES and the Kconfig help warns that accesses
+# "will crash randomly" after roughly a 20 °C temperature change. Not worth it
+# for this application.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# --- Partition table --------------------------------------------------------
+# Dual OTA slots are required for esp_https_ota; see partitions.csv.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- Logging ----------------------------------------------------------------
+# The previous build had LOG_MAXIMUM_LEVEL=WARN (verified in
+# build/config/sdkconfig.h), which compiles every ESP_LOGI in the tree out of
+# the binary. The board booted silently, and the CI step that greps for
+# "Application initialized successfully" was asserting on a string that could
+# not exist in the image.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
+
+# --- Task watchdog ----------------------------------------------------------
+# The real TWDT timeout, set where it actually takes effect. Previously "30 s"
+# existed only as a claim in Application_cfg.hpp while the hardware watchdog
+# stayed at its 5 s default -- WatchdogSupervisor::initialize() never
+# programmed it, so the configured value was fiction.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# --- WiFi credentials are deliberately NOT set here -------------------------
+# Provision at runtime over the serial console; credentials are stored in NVS:
+#
+#     esp32> wifi_set <ssid> <password>
+#
+# Build-time credentials would be baked into the firmware image in plaintext,
+# would be shared by every device flashed from the same build, and would end up
+# in git. Use the console command instead.

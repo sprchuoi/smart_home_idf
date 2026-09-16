@@ -13,6 +13,11 @@
 #include "linenoise/linenoise.h"
 
 
+namespace {
+// How often run() logs its liveness line.
+constexpr uint32_t APP_STATUS_INTERVAL_MS = 2000;
+}  // namespace
+
 const char* Application::TAG = "Application";
 
 Application::Application()
@@ -65,93 +70,52 @@ bool Application::initialize() {
         return false;
     }
 
-    // Check if WiFi credentials are configured
+    // --- WiFi ---------------------------------------------------------------
+    // Credentials come from NVS, provisioned at runtime over the console:
+    //     esp32> wifi_set <ssid> <password>
+    // A device with no credentials boots to a usable console instead of
+    // retrying forever.
     if (!WifiConfigInterface::getInstance().hasCredentials(&g_wifi_cfg)) {
-        ESP_LOGW(TAG, "WiFi credentials not configured!");
-        ESP_LOGW(TAG, "Use console commands to configure:");
+        ESP_LOGW(TAG, "No WiFi credentials configured.");
+        ESP_LOGW(TAG, "Provision over the console, then reboot:");
         ESP_LOGW(TAG, "  wifi_set <ssid> <password>");
-        ESP_LOGW(TAG, "Or set defaults in code");
-        
-        // Optional: Set default credentials here for testing
-        // WifiProvisioning::getInstance().setDefaultCredentials("YourSSID", "YourPassword");
+    } else if (!m_wifi_service.initialize(&g_wifi_cfg)) {
+        ESP_LOGE(TAG, "Failed to initialize WifiService");
+        return false;
+    } else if (!m_wifi_service.connect()) {
+        // WifiService::initialize() only configures the driver -- esp_wifi_start()
+        // lives in connect(). That call was missing entirely, so the radio never
+        // came up, no WIFI_CONNECTED event was ever published, and everything
+        // downstream (state machine, MQTT) silently never ran.
+        ESP_LOGE(TAG, "Failed to start WiFi");
+        return false;
     } else {
-        ESP_LOGI(TAG, "WiFi credentials configured");
-        // Initialize WiFi Service
-        if (!m_wifi_service.initialize(&g_wifi_cfg)) {
-            ESP_LOGE(TAG, "Failed to initialize WifiService");
-            return false;
-        }
+        ESP_LOGI(TAG, "WiFi started, awaiting connection");
     }
      
-    // // Initialize Error Handler
-    // // (Singleton, no explicit init needed)
-    
-    // // Initialize State Machine
-    // if (!m_state_machine.initialize()) {
-    //     ESP_LOGE(TAG, "Failed to initialize AppStateMachine");
-    //     return false;
-    // }
-    
-    // Initialize Display (disabled - hardware may not be connected)
-    // Uncomment when OLED display is connected to I2C pins (SDA: GPIO21, SCL: GPIO22)
-    // if (!m_display.initialize()) {
-    //     ESP_LOGW(TAG, "Failed to initialize OLED display (continuing anyway)");
-    // }
-    
-    
-    
-    // Initialize MQTT Service
-    // TODO: Configure MQTT broker URI and client ID
-    // const char* mqtt_broker = "mqtt://192.168.1.100:1883";  // Change to your broker
-    // const char* mqtt_client_id = "esp32_smart_home";
-    
-    // if (!m_mqtt_service.initialize(mqtt_broker, mqtt_client_id)) {
-    //     ESP_LOGE(TAG, "Failed to initialize MqttService");
-    //     return false;
-    // }
-    
-    // // Initialize Watchdog Supervisor
-    // if (!m_watchdog.initialize(wdt_config)) {  // 30 second timeout
-    //     ESP_LOGE(TAG, "Failed to initialize WatchdogSupervisor");
-    //     return false;
-    // }
-    
-    // // Initialize Power Manager
-    // if (!m_power_manager.initialize()) {
-    //     ESP_LOGE(TAG, "Failed to initialize PowerManager");
-    //     return false;
-    // }
-    
-    // // Initialize Audio State Machine
-    // if (!m_audio_state_machine.initialize()) {
-    //     ESP_LOGE(TAG, "Failed to initialize AudioStateMachine");
-    //     return false;
-    // }
-    
-    // // Initialize Audio Pipeline
-    // // if (!m_audio_pipeline.initialize(16000, 16, I2S_NUM_0, GPIO_NUM_4, GPIO_NUM_5, GPIO_NUM_18)) {
-    // //     ESP_LOGW(TAG, "Failed to initialize AudioPipeline (continuing anyway)");
-    // // }
-    
-    // // Initialize Wake Word Service (with AudioPipeline)
-    // // if (!m_wake_word_service.initialize(&m_audio_pipeline)) {
-    // //     ESP_LOGW(TAG, "Failed to initialize WakeWordService. Disabling service.");
-    // //     return false;
-    // // }
-    
-    // // Initialize OTA Service
-    // if (!m_ota_service.initialize()) {
-    //     ESP_LOGW(TAG, "Failed to initialize OTAService (continuing anyway)");
-    // }
-    
-    // Note: UART Driver not initialized - ESP Console already uses UART0
-    // If you need separate UART communication, configure UartDriver for UART1 or UART2
+    // --- Not yet enabled ----------------------------------------------------
+    // These services are compiled but deliberately left off until a later phase,
+    // listed here so the gap is visible rather than looking like working config:
+    //
+    //   AppStateMachine    event graph is unreachable -- WIFI_STARTED and
+    //                      WIFI_GOT_IP are never published by anything, so it
+    //                      would sit in INIT forever.
+    //   MqttService        needs broker identity from NVS, not a hardcoded URI.
+    //   WatchdogSupervisor initialize() never calls esp_task_wdt_init(), so the
+    //                      configured 30 s timeout is fiction today.
+    //   OTAService         written against esp_https_ota() without ever holding
+    //                      a handle, so its success path is dead code.
+    //   OledDisplay        render path is a stub -- no framebuffer, no font.
+    //   PowerManager       MODEM_SLEEP is unimplemented and LIGHT_SLEEP can sleep
+    //                      indefinitely on a zero-length timer.
+    //
+    // UartDriver is off by design: the ESP console already owns UART0.
+    // AudioPipeline, AudioStateMachine and WakeWordService were removed -- they
+    // were scaffolding with no working wake-word model behind them, and
+    // AudioPipeline does not compile for the ESP32-S3 at all.
     
     // Note: Watchdog tasks will be registered in start() after all services are fully running
-    
-    // Setup event subscriptions
-    setupEventSubscriptions();
-    
+
     m_initialized = true;
     ESP_LOGI(TAG, "Application initialized successfully");
     return true;
@@ -168,34 +132,18 @@ bool Application::start() {
     }
     
     ESP_LOGI(TAG, "Starting application...");
-    
-    // Start audio pipeline
-    // m_audio_pipeline.start();
-    
-    // Start wake word service
-    // m_wake_word_service.start();
-    
-    // Start UART driver
-    m_uart_driver.start();
-    
-    // Register tasks with watchdog (after all tasks are created)
-    TaskHandle_t wifi_handle = m_wifi_service.getTaskHandle();
-    TaskHandle_t mqtt_handle = m_mqtt_service.getTaskHandle();
-    TaskHandle_t state_handle = m_state_machine.getTaskHandle();
-    // TaskHandle_t audio_handle = m_audio_pipeline.getTaskHandle();
-    // TaskHandle_t wake_handle = m_wake_word_service.getTaskHandle();
-    
-    if (wifi_handle) m_watchdog.registerTask(WatchdogTask::WIFI_SERVICE, wifi_handle);
-    if (mqtt_handle) m_watchdog.registerTask(WatchdogTask::MQTT_SERVICE, mqtt_handle);
-    if (state_handle) m_watchdog.registerTask(WatchdogTask::APP_STATE_MACHINE, state_handle);
-    // if (audio_handle) m_watchdog.registerTask(WatchdogTask::AUDIO_PIPELINE, audio_handle);
-    // if (wake_handle) m_watchdog.registerTask(WatchdogTask::WAKE_WORD_SERVICE, wake_handle);
-    
-    // Publish Home Assistant discovery
-    if (m_mqtt_service.isConnected()) {
-        m_mqtt_service.publishHADiscovery("ESP32 Smart Home", "esp32_smart_home");
-    }
-    
+
+    // UartDriver is deliberately neither started nor stopped here.
+    // It defaults to UART0, which the esp_console REPL already owns, so start()
+    // would fail anyway -- and its stop() is unguarded: it calls
+    // uart_driver_delete(UART_NUM_0) against the console's driver and then
+    // double-frees the event queue that uart_driver_delete already released.
+    // Point it at UART1 with explicit ESP32-S3 pins before enabling it.
+    //
+    // Watchdog registration is likewise skipped: WatchdogSupervisor::initialize()
+    // never calls esp_task_wdt_init(), so registerTask() early-returns and
+    // listing tasks here would imply supervision that is not happening.
+
     m_running = true;
     ESP_LOGI(TAG, "Application started");
     return true;
@@ -210,20 +158,15 @@ void Application::run() {
     }
     
     ESP_LOGI(TAG, "Application running...");
-    
-    // Main loop - update display periodically
+
+    // Status heartbeat. There is no display yet -- OledDisplay's render path is
+    // a stub and it is not initialized -- so this exists to prove the scheduler
+    // is alive and to surface link state at a glance over serial.
     while (m_running) {
-        // Update display with current state
-        DisplayUpdate update;
-        update.type = DisplayUpdate::APP_STATE;
-        update.line1 = "Smart Home";    
-        update.line2 = "State: " + m_state_machine.getStateString();
-        update.line3 = "WiFi: " + std::string(m_wifi_service.isConnected() ? "Connected" : "Disconnected");
-        update.line4 = "MQTT: " + std::string(m_mqtt_service.isConnected() ? "Connected" : "Disconnected");
-        
-        m_display.updateDisplay(update);
-        
-        vTaskDelay(pdMS_TO_TICKS(2000));  // Update every 2 seconds
+        ESP_LOGI(TAG, "alive | wifi:%s | ip:%s",
+                 m_wifi_service.isConnected() ? "up" : "down",
+                 m_wifi_service.getIPAddress().c_str());
+        vTaskDelay(pdMS_TO_TICKS(APP_STATUS_INTERVAL_MS));
     }
 }
 
@@ -236,14 +179,11 @@ void Application::stop() {
     
     m_running = false;
     
-    // m_wake_word_service.stop();
-    // m_audio_pipeline.stop();
+    // m_uart_driver.stop() is intentionally absent -- see start() for why.
     m_ota_service.stop();
-    m_uart_driver.stop();
     m_mqtt_service.stop();
     m_wifi_service.stop();
     m_display.stop();
-    m_audio_state_machine.stop();
     m_state_machine.stop();
     m_power_manager.stop();
     m_watchdog.stop();
@@ -254,21 +194,12 @@ void Application::stop() {
     ESP_LOGI(TAG, "Application stopped");
 }
 
-void Application::setupEventSubscriptions() {
-    // Only setup critical event subscriptions to avoid EventBus exceptions
-    // Note: Some services subscribe to events internally
-    ESP_LOGI(TAG, "Event subscriptions configured");
-}
-
+// NOTE: this is currently unreachable -- nothing publishes STATE_CHANGED and
+// AppStateMachine is never initialized. It is kept because it is the intended
+// hook for bringing MQTT up once WiFi connects. Do not assume it runs.
 void Application::handleStateChange(const EventMessage& event) {
-    ESP_LOGI(TAG, "State changed: %s", event.payload.state_info.state_name);
-    
-    // Update display
-    DisplayUpdate update;
-    update.type = DisplayUpdate::APP_STATE;
-    update.line1 = "State: " + std::string(event.payload.state_info.state_name);
-    m_display.updateDisplay(update);
-    
+    ESP_LOGI(TAG, "State changed: %s", event.payload.state_info.text);
+
     // Handle MQTT connection when WiFi is connected
     if (m_state_machine.getState() == AppState::WIFI_CONNECTED) {
         if (!m_mqtt_service.isConnected()) {
@@ -276,24 +207,5 @@ void Application::handleStateChange(const EventMessage& event) {
             m_mqtt_service.connect();
         }
     }
-}
-
-void Application::handleWakeWord(const EventMessage& event) {
-    (void)event;
-    ESP_LOGI(TAG, "Wake word detected!");
-    
-    // Publish wake word event to MQTT
-    if (m_mqtt_service.isConnected()) {
-        const char* topic = "smart_home/wake_word";
-        const char* data = "{\"event\":\"wake_word_detected\",\"timestamp\":1234567890}";
-        m_mqtt_service.publish(topic, data, strlen(data));
-    }
-    
-    // Update display
-    DisplayUpdate update;
-    update.type = DisplayUpdate::TEXT;
-    update.line1 = "Wake Word";
-    update.line2 = "Detected!";
-    m_display.updateDisplay(update);
 }
 

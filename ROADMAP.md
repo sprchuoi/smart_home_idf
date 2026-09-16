@@ -1,0 +1,346 @@
+# Smart Home → Google Home — Roadmap & Progress
+
+**Status as of 2026-09-16** · branch `phase1-esp32s3-retarget`
+
+Goal: a DIY smart home controllable from Google Home, with sensors on ESP32 hardware and a
+Raspberry Pi as the hub.
+
+Legend: `[x]` done · `[~]` in progress · `[ ]` todo · `[!]` blocked · `?` needs a decision
+
+---
+
+## Progress at a glance
+
+| Phase | Scope | Status |
+|---|---|---|
+| 0 | Prerequisites & hardware ground truth | `[ ]` not started |
+| 1 | Retarget to ESP32-S3, clear dead weight | `[~]` **build green; CI + hardware verification outstanding** |
+| 2 | MQTT + Home Assistant | `[ ]` not started |
+| 3 | Sensors | `[ ]` not started |
+| 4 | Google Home via Matter bridge | `[ ]` not started |
+| 5 | Actuators | `[ ]` not started |
+| 6 | nRF5340 Thread sensor node | `[ ]` not started |
+| 7 | OTA + hardening | `[ ]` not started |
+| 8 | Voice (parked) | `[ ]` parked |
+
+---
+
+## Decisions taken
+
+| Decision | Choice |
+|---|---|
+| Firmware | ESP-IDF v5.5.1 for ESP32-S3; Zephyr kept solely for the nRF5340 |
+| Google Home path | Home Assistant + `RiDDiX/home-assistant-matter-hub` Matter bridge |
+| nRF5340 | Thread sensor node via Home Assistant's own border router — later phase |
+| Target board | ESP32-S3-DevKitC-1 **N16R8** — 16 MB flash, 8 MB octal PSRAM |
+
+### Why this architecture
+
+Google only needs to see a **Matter bridge**; how Home Assistant gets the data is irrelevant to
+it. So the ESP32-S3 stays on plain MQTT (the one thing already partly working) and the Pi does
+the bridging. Result: **$0 recurring**, nothing exposed publicly, no OAuth server, no cloud
+project, no firmware rewrite onto ESP-Matter.
+
+```
+        Google Home app  ·  Nest speaker
+                    │  Matter (local, QR pairing)
+        ┌───────────▼─────────────────────────────┐
+        │  Raspberry Pi                            │
+        │    Mosquitto   ← MQTT broker             │
+        │    Home Assistant                        │
+        │      └─ HAMH add-on → Matter bridge      │
+        └───────────┬──────────────────────────────┘
+                    │  MQTT over WiFi 2.4 GHz
+        ┌───────────▼──────────────────────────────┐
+        │  ESP32-S3 nodes — sensors + actuators    │
+        └──────────────────────────────────────────┘
+```
+
+---
+
+## Phase 0 — Prerequisites
+
+No code. Confirm ground truth before trusting the partition layout.
+
+- [ ] Confirm board revision and actual flash/PSRAM (`esptool.py flash_id`). A wrong
+      `CONFIG_SPIRAM_MODE_OCT` gives a **boot loop**, not a build error.
+- [ ] Obtain **one Google Nest speaker/hub** (Nest Mini is enough). The phone app alone cannot
+      do voice control.
+- [ ] Confirm the Pi's OS, storage, and that it is on the same L2 subnet as the nodes.
+- [ ] Router: **IPv6 on, IGMP snooping off, AP isolation off.** This is the #1 cause of Matter
+      bridge "No Response" and it is a network problem, not software.
+- [ ] Note the usable GPIO budget: 0-25 and 38-48 only. See *Verified findings* below.
+
+**Exit criteria:** board flashed with any known-good firmware and serial logs readable.
+
+---
+
+## Phase 1 — Retarget to ESP32-S3 and clear dead weight
+
+### Build & target — DONE
+
+- [x] `sdkconfig.defaults` at repo root, retargeted to esp32s3 / 16 MB / octal PSRAM @ 80 MHz
+- [x] `sdkconfig.defaults` un-ignored in `.gitignore` (a fresh clone previously could not
+      reproduce the build)
+- [x] `partitions.csv` rewritten: dual 4 MB OTA slots (previously **no OTA slot at all**)
+- [x] `main/CMakeLists.txt`: dropped `.hpp` from `SRCS`, dropped the dead
+      `set(SDKCONFIG_DEFAULTS ...)`
+- [x] **Build verified green**: `smart_home.bin` 838 KB, 80 % of the app slot free
+- [x] Logging un-broken: `LOG_MAXIMUM_LEVEL` 2 → 3, so `ESP_LOGI` compiles in at all
+
+### Critical bugs fixed
+
+- [x] **WiFi never started.** `WifiService::connect()` — which holds `esp_wifi_start()` — was
+      called by nothing. The radio never came up and everything downstream was dead.
+- [x] **`UartDriver::stop()` tore down the console** — called `uart_driver_delete(UART_NUM_0)`
+      on the esp_console REPL's driver, then double-freed its event queue. Fired on every
+      shutdown.
+- [x] **EventBus 51.8 KB → 3.8 KB** and made value-semantic. See *Verified findings*.
+- [x] Removed the commented-out service graveyard from `Application.cpp`; replaced with an
+      honest "not yet enabled, and why" block.
+
+### Still outstanding in Phase 1
+
+- [ ] **CI is still broken and silently green.** `.github/workflows/ci.yml` has 9 literal `\\`
+      line-continuations inside `run: |` blocks (lines 80-84, 174-177). Each ends in `|| true`,
+      so the pipeline reports success while running nothing. Also needs `target: esp32s3`.
+- [ ] **Delete the QEMU job.** `qemu-system-xtensa` cannot emulate an S3, and the job passes on
+      failure. Replace with a real `idf.py size` assertion.
+- [ ] `make.sh:44` hardcodes `ESP32_TARGET="esp32"`; the QEMU path at lines 395-399 too.
+- [ ] `main/app/cfg/Application_cfg.hpp` — `idle_core_mask = CONFIG_ESP_MAIN_TASK_AFFINITY` is
+      a type confusion (affinity selector where a core bitmask belongs). With the default it
+      evaluates to `0x0`, i.e. **no idle task monitored**. Should be `0x3`.
+- [ ] `main/Kconfig` bakes `CONFIG_WIFI_SSID`/`CONFIG_WIFI_PASSWORD` into the firmware image —
+      exactly what NVS provisioning exists to avoid. Remove.
+- [ ] `main/sdkconfig.defaults` is now orphaned (root file is authoritative) and holds
+      placeholder credentials. Remove.
+- [ ] `debug.sh` hardcodes `xtensa-esp32-elf-gdb`; needs `xtensa-esp32s3-elf-gdb` or `idf.py gdb`.
+- [ ] **Hardware verification — nothing has run on a board yet.** See the checklist at the end.
+- [ ] Establish a real test foundation: host-side unit tests via IDF's `linux` preview target
+      (`PREVIEW_TARGETS` in `tools/idf_py_actions/constants.py`), so CI does something true.
+
+**Exit criteria:** board boots on S3, joins WiFi from NVS credentials, reports its IP, and the
+boot heap reflects the EventBus saving.
+
+---
+
+## Phase 2 — MQTT and Home Assistant
+
+- [ ] MQTT: set `session.last_will` (today an `availability_topic` is advertised in discovery
+      but never published, and there is no will — so entities would always read unavailable)
+- [ ] Reconnect backoff; `disable_auto_reconnect = true` and own the loop, because esp-mqtt's
+      built-in reconnect is a fixed 10 s with no backoff
+- [ ] QoS per topic class: **1 for commands/state/availability/discovery, 0 for telemetry**
+- [ ] Replace `MqttService::taskLoop()`'s do-nothing 5 s sleep with a real reconnect supervisor
+- [ ] Topic schema: `smart_home/<id>/{availability,status,<chan>/state,cmd/<target>}`
+- [ ] Device identity + provisioning in NVS, cloning the console-command pattern from
+      `WifiConfigInterface.cpp`. Fix its `clearCredentials()` bug in the clone (it writes empty
+      strings, so `hasCredentials()` then returns true).
+- [ ] HA MQTT discovery per entity (not the current single hardcoded `binary_sensor`), with a
+      shared `device` block so entities group under one device
+- [ ] Pi: Mosquitto with auth, Home Assistant, MQTT integration
+
+**Exit criteria:** device appears in HA with correct availability; pulling power flips it to
+unavailable within the keepalive window; a command from HA reaches the board.
+
+---
+
+## Phase 3 — Sensors
+
+Currently 0 % built in either repo.
+
+- [ ] Thin sensor abstraction: `begin()`, `read()`, and a descriptor (unit, device class)
+- [ ] Drivers for sensors actually on hand — I2C, plus ADC/GPIO for binary inputs
+- [ ] Publish on change-of-state plus a periodic heartbeat
+- [ ] Correct `device_class` / `unit_of_measurement` / `state_class` in discovery
+- [ ] **Settle entity naming here**, before Phase 4. Some HAMH upgrades force a one-time
+      re-pair and lose controller room assignments.
+
+**Exit criteria:** real sensor values in HA, updating on cadence, surviving a broker restart.
+
+---
+
+## Phase 4 — Google Home
+
+Deliberately small, because research removed the hard parts.
+
+- [ ] Install `RiDDiX/home-assistant-matter-hub` — HA add-on slug `hamh`, or Docker
+      `ghcr.io/riddix/home-assistant-matter-hub:latest` (`--network host`, `/data` volume).
+      **Use the stable channel**; the project labels `testing` "Highly unstable".
+- [ ] Expose the chosen entities to the bridge
+- [ ] Commission into Google Home by scanning the QR code. An **"Uncertified device"** warning
+      is expected and fine.
+- [ ] If a device pairs but never reports state, reach for the **`omitEventsInPriming`** flag —
+      it exists for the Google fabric that acks subscription chunks but never answers the last
+      one, which otherwise leaves the device permanently offline.
+
+**Exit criteria:** "Hey Google, what's the temperature in the <room>?" returns a real value from
+the ESP32-S3. This is the project's headline milestone.
+
+---
+
+## Phase 5 — Actuators
+
+- [ ] Relay/switch control, retained state, QoS 1 commands
+- [ ] Track command acknowledgement rather than assuming the relay moved
+- [ ] Re-verify in HA and via voice
+
+**Exit criteria:** voice toggles a real load, and HA state matches physical reality after a node
+reboot or broker restart.
+
+---
+
+## Phase 6 — nRF5340 Thread sensor node
+
+- [ ] HA needs a Thread border router with an RCP (nRF52840 dongle or similar).
+      **Google's certified-TBR restriction does not apply** — HA terminates the Thread side and
+      hands Google an ordinary Matter entity.
+- [ ] Zephyr + OpenThread sleepy end device publishing sensor data
+- [ ] **Pin a Zephyr version first.** `smart_home_zephyr` tracks `revision: main` with no lock
+      file, so its builds are not reproducible.
+
+**Exit criteria:** a battery-powered nRF5340 sensor appears in HA and is controllable from
+Google Home.
+
+---
+
+## Phase 7 — OTA and hardening
+
+- [ ] HTTPS OTA with dual-slot rollback, exercised for real (push a bad image, confirm rollback).
+      **`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is not currently set** — the docs claim
+      "rollback protection" today, which is false.
+- [ ] TLS on MQTT, credentials in NVS
+- [ ] Watchdog on the tasks that need it; power management if nodes go battery
+
+**Exit criteria:** an OTA update ships, and a deliberately broken image rolls back.
+
+---
+
+## Phase 8 — Voice (parked)
+
+- [ ] Only if wanted. Needs an I2S mic and a real wake-word model; ESP-SR WakeNet on the S3 is
+      the realistic route.
+- Note: **no working wake-word model exists in any of the three repos.** The openWakeWord
+      artifact's commit says "new custom training for esp32" but it is
+      `"model_type": "placeholder"` — an energy threshold, not a network.
+
+---
+
+## Verified findings
+
+Recorded so they do not have to be re-derived. Each was checked against source or a build, not
+recalled.
+
+### EventBus memory (measured)
+
+| | `sizeof(EventMessage)` | 50-deep queue |
+|---|---|---|
+| Before | 1036 B | **51,800 B (50.6 KB)** |
+| After | 76 B | **3,800 B (3.7 KB)** |
+| Saved | | **48,000 B (46.9 KB)** |
+
+Internal SRAM, and it **cannot** be moved to PSRAM — FreeRTOS allocates queues with
+`MALLOC_CAP_INTERNAL` (`components/freertos/heap_idf.c:47`) regardless of
+`CONFIG_SPIRAM_USE_MALLOC`.
+
+> An earlier draft of this plan said 1048 B / 52,400 B. That came from compiling the struct on
+> x86-64, where `size_t` and pointers are 8 bytes. The target is 32-bit. The replacement struct
+> has no pointer-width types, so its 76 B is platform-independent.
+
+### The dangling pointer was unconditional, not latent
+
+`AppStateMachine.cpp:240` does
+`event.payload.state_info.state_name = getStateString().c_str()`. `getStateString()` returns
+`std::string` **by value**, so the pointer dangled before `publish()` was called. `MqttService`
+did the same with stack-local topic/payload buffers. Fixed by making every payload member
+value-semantic and adding `setEventStateName()` / `setEventOtaStatus()` / `setEventErrorMsg()`
+so the mistake is unrepresentable.
+
+### Logging was entirely compiled out
+
+`build/config/sdkconfig.h` had `CONFIG_LOG_MAXIMUM_LEVEL 2` (WARN). Every `ESP_LOGI` in the tree
+was stripped, the board booted silently, and CI's grep for `"Application initialized successfully"`
+asserted on a string that could not exist. Now level 3 (INFO).
+
+### CI failure mode (reproduced)
+
+The `\\` continuations survive into bash as literal backslashes, so:
+
+```
++ cppcheck --enable=all '\'
+bash: line 1: cppcheck: command not found
++ --suppress=missingIncludeSystem '\'
+bash: line 2: --suppress=missingIncludeSystem: command not found
++ true                      ← exit 0, job reports success
+```
+
+### ESP32-S3 pin budget (from IDF's own docs)
+
+`docs/en/api-reference/peripherals/gpio/esp32s3.inc:253`: with octal flash/PSRAM it says
+GPIO26-32 are used by SPI0/1 **and GPIO33-37 are connected to SPIIO4-7/SPIDQS** and "not
+recommended for other uses." The N16R8 uses an ESP32-S3R8 — octal. Budget **0-25 and 38-48**,
+avoiding strapping pins 0/3/45/46.
+
+Bootloader offset is `0x0` on S3 (`components/bootloader/Kconfig.projbuild:9-12` — `0x1000` is
+only ESP32/S2).
+
+### Previous state of the two repos
+
+- `smart_home_idf` ran only: console REPL, NVS, EventBus, WiFi, UART. Everything else commented out.
+- `smart_home_zephyr` was a parallel firmware for the same chip — working MQTT/MCUboot/BLE, but
+  **zero references to nrf5340, Thread, 802.15.4, Zigbee or Matter**, and its only "sensor" is a
+  fake GPIO one, `disabled` on the ESP32 overlay.
+- **No server-side code existed at all.** The Pi is greenfield.
+
+---
+
+## Open decisions
+
+| # | Question | Notes |
+|---|---|---|
+| 1 | EventBus: keep the shrunk 3.8 KB version, or delete it? | It now has producers but **no consumers**. The topology is a DAG (WiFi → MQTT → {publish, command → OTA}), not a bus, and every edge is single-listener. Callbacks would close the dangling-pointer class by construction. Decide in Phase 2 when MQTT gets wired. |
+| 2 | `OledDisplay`: keep or delete? | `renderUpdate()` only logs — no framebuffer, no font. `writeData()` contains a `vTaskDelete(nullptr)`, which deletes the *calling* task. Defaults to I2C pins 21/22, which happen to be valid on S3. It is a skeleton, not a display driver. |
+| 3 | `PowerManager`: keep or delete? | `MODEM_SLEEP` is a stub; `LIGHT_SLEEP` can sleep indefinitely on a zero-length timer; wake source is GPIO0, a strapping pin. Only worth keeping if nodes run on battery — WiFi nodes generally will not. |
+| 4 | `WatchdogSupervisor`: keep or delete? | `initialize()` never calls `esp_task_wdt_init()`, so the "30 s timeout" is fiction. `feedWatchdog(task)` calls `esp_task_wdt_reset()`, which resets **the calling task only** — so feeding "on behalf of" another task is meaningless. IDF's TWDT does this correctly on its own. |
+
+---
+
+## Blocked
+
+| Item | Why |
+|---|---|
+| Delete `main/services/audio/`, `main/core/audio/`, `main/services/wakeup/` | Denied by the permission classifier — pre-existing directories not explicitly named by the user. **Not blocking progress**: the files are out of `CMakeLists.txt` so they are not compiled. They are orphaned dead code that will not build if reintroduced (`AudioStateMachine.cpp:185` still uses the removed `state_name` member). |
+
+---
+
+## Hardware verification checklist
+
+Nothing has run on a board. This is the gate on declaring Phase 1 finished.
+
+- [ ] `idf.py -p <PORT> flash monitor`
+- [ ] Boot banner shows **ESP-IDF v5.5.1** and target **esp32s3**
+- [ ] PSRAM detected as **8 MB** (watch for a boot loop here — that means the wrong PSRAM mode)
+- [ ] `esp32>` console prompt appears on UART0
+- [ ] `wifi_set <ssid> <password>`, reboot, confirm association and IP
+- [ ] `run()` prints its `alive | wifi:up | ip:...` heartbeat every 2 s
+- [ ] Boot heap reflects the EventBus saving against the old build
+
+---
+
+## Risks
+
+- **HAMH is a community fork.** Verified healthy (2,200 commits, 1.2k stars, stable v2.0.57, not
+  archived), but it replaced an add-on that *was* archived once. Its migration path preserves
+  Matter fabric pairings, so moving between forks does not force re-pairing. Fallbacks: Nabu Casa
+  Cloud (~$6.50/mo, zero firmware change) or the `matterbridge` MQTT plugin.
+- **Matter bridging is network-sensitive.** IPv6, mDNS/multicast, IGMP snooping, AP isolation.
+  Treat the Phase 0 checklist as a hard prerequisite.
+- **Phase 4 depends on 2 and 3 genuinely working.** A Matter bridge in front of unreliable MQTT
+  just produces unreliable Google Home control.
+
+### Dead ends — do not spend time here
+
+Local Home SDK (unmaintained 4+ years) · Actions on Google console (retired Dec 2024) · Google
+Home APIs (mobile-app scoped, no Cloud API) · the original `t0bst4r` Matter Hub add-on (archived
+Jan 2026) · Matter-over-Thread commissioned *directly* by Google (requires a Google-certified
+border router — the HA-bridge route sidesteps this entirely).

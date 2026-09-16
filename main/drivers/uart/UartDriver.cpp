@@ -161,15 +161,13 @@ void UartDriver::taskLoop()
             case UART_DATA: {
                 size_t len = read(buffer, UART_RX_BUF_SIZE, 0);
                 if (len > 0) {
-                    EventMessage uart_event{};
-                    uart_event.type = EventType::UART_DATA_RECEIVED;
-                    uart_event.source = EventSource::UART_DRIVER;
-                    uart_event.destination = EventSource::APPLICATION;
-
-                    memcpy(uart_event.payload.uart_data.data, buffer, len);
-                    uart_event.payload.uart_data.data_len = len;
-
-                    EventBus::getInstance().publish(uart_event);
+                    // Received bytes are variable-length and deliberately do not
+                    // travel through the EventBus, whose payload is a
+                    // fixed-size union. A 1 KB inline buffer there would make
+                    // every queued event 1 KB, which is what the payload used
+                    // to do. Deliver to a consumer directly instead.
+                    ESP_LOGI(TAG, "RX %u bytes: %.*s",
+                             (unsigned)len, (int)len, (const char*)buffer);
                 }
                 break;
             }
