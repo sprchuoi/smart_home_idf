@@ -1,72 +1,92 @@
 Development Guide
-==================
+=================
 
 Building
 --------
 
-See :doc:`getting-started` for build instructions.
+See :doc:`getting-started`.
 
-Code Structure
+Code structure
 --------------
 
 .. code-block:: text
 
    main/
-   ├── app/          # Application orchestrator
-   ├── core/          # Core services (EventBus, State Machines)
-   ├── services/       # Service layer (WiFi, MQTT, Audio, OTA)
-   ├── drivers/       # Hardware drivers (OLED, UART)
-   └── error/         # Error handling
+   ├── app/            Application orchestrator -- owns services, wires callbacks
+   ├── core/           Application state
+   ├── services/       WiFi, MQTT, OTA -- each with its own NVS config
+   ├── drivers/        UART
+   └── error/          Error logging and counters
 
-Adding a New Service
---------------------
+The rule that keeps this tidy: **only ``Application`` knows about more than one
+service.** It constructs them and wires their callbacks. Nothing else reaches
+across a service boundary.
 
-1. Create service class (``.h`` and ``.cpp``)
-2. Add to ``main/CMakeLists.txt``
-3. Initialize in ``Application::initialize()``
-4. Subscribe/publish to EventBus
-5. Register with watchdog (if critical)
+Adding a service
+----------------
 
-Adding a New Event
--------------------
+1. Create the class under ``main/services/<name>/``.
+2. Add its ``.cpp`` to ``SRCS`` in ``main/CMakeLists.txt``, and any new
+   component it needs to ``REQUIRES``. Prefer the specific ``esp_driver_*``
+   component over the legacy ``driver`` umbrella.
+3. Own an instance in ``Application`` and construct it in ``initialize()``.
+4. If it needs to tell anyone something, expose a
+   ``std::function`` callback setter and invoke it -- do **not** add a shared
+   event bus. See :doc:`architecture` for why that was removed.
+5. If it has device-specific configuration, put it in NVS behind a console
+   command, following ``MqttConfigInterface`` as the template.
 
-1. Add to ``EventType`` enum in ``EventBus.h``
-2. Add payload structure to ``EventPayload`` union if needed
-3. Publish from service
-4. Subscribe in state machine/application
+Adding a telemetry channel
+--------------------------
+
+1. Publish it from wherever the value is known:
+   ``m_mqtt_service.publishState("<channel>", "<value>")``.
+2. Add a matching entry to ``MqttService::publishDiscovery()`` so Home
+   Assistant knows about it, with the right ``device_class``, unit and
+   ``state_class``.
+3. Keep ``channel`` lowercase and free of slashes -- it becomes a topic
+   segment.
+
+Adding a command
+----------------
+
+Extend ``Application::onMqttCommand()``. It runs in the esp-mqtt task, so it
+must not block: set a flag and let a service task do the work, as the ``ota``
+command does.
 
 Testing
 -------
 
-Unit Tests
-~~~~~~~~~~
-
-Create tests in ``tests/`` directory:
-
 .. code-block:: bash
 
-   ./make.sh test
+   ./make.sh smoke    # verify the built image: target, PSRAM, log level, OTA slots
+   ./make.sh test     # static analysis
 
-QEMU Testing
-~~~~~~~~~~~~
+``smoke`` is the one that matters before flashing. It checks the things that
+otherwise only show up on the bench -- wrong target, wrong PSRAM mode, logging
+compiled out, missing OTA partitions, image too large.
 
-.. code-block:: bash
+There is no QEMU target. ``qemu-system-xtensa`` cannot emulate an ESP32-S3,
+which is why the old QEMU job could never have passed and has been removed.
 
-   ./make.sh test-qemu
+.. note::
 
-Static Analysis
-~~~~~~~~~~~~~~~
+   Host-side unit tests are still outstanding. Pure logic -- discovery payload
+   construction, topic formatting, sensor value conversion -- should be tested
+   on the host via ESP-IDF's ``linux`` preview target, which runs in CI in
+   seconds with no hardware.
 
-.. code-block:: bash
-
-   cppcheck --enable=all main/
-
-Code Style
+Code style
 ----------
 
-* Use ``esp_log`` for logging
-* Follow ESP-IDF coding standards
-* Use RAII for resource management
-* No global variables (except controlled singletons)
-* Thread-safe design
-
+* ``esp_log`` for logging; the level is set in ``sdkconfig.defaults``.
+* RAII for resources. Prefer ``std::atomic`` / ``SemaphoreHandle_t`` over
+  unsynchronised flags.
+* No globals. Singletons are reserved for the NVS config interfaces, and only
+  because an ``esp_console`` command handler is a bare function pointer with
+  nowhere else to reach the store.
+* Pin tasks explicitly with ``xTaskCreatePinnedToCore`` and state the core in a
+  named constant.
+* Comment *why*, not what. The interesting comments in this codebase are the
+  ones explaining a non-obvious constraint -- for example why telemetry is QoS 0
+  while availability is QoS 1.

@@ -1,85 +1,148 @@
-ESP32 Smart Home Documentation
-==============================
+ESP32-S3 Smart Home
+===================
+
+A DIY smart home whose devices are controllable from Google Home, built from an
+ESP32-S3 node and a Raspberry Pi acting as the hub.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Concept
+
+   architecture
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Using it
 
    getting-started
-   architecture
-   api/index
-   development
    deployment
 
+.. toctree::
+   :maxdepth: 2
+   :caption: Working on it
+
+   api/index
+   development
+
 .. note::
-   **Additional Resources:**
-   
-   - `Doxygen API Reference <doxygen/index.html>`_
-   - `GitHub Repository <https://github.com/sprchuoi/smart_home_idf>`_
-   - `Report Issues <https://github.com/sprchuoi/smart_home_idf/issues>`_
 
-Welcome to the ESP32 Smart Home firmware documentation!
+   - `Doxygen API reference <doxygen/index.html>`_
+   - `GitHub repository <https://github.com/sprchuoi/smart_home_idf>`_
+   - `Report an issue <https://github.com/sprchuoi/smart_home_idf/issues>`_
 
-This is a production-ready, low-power, real-time, voice-activated ESP32 smart home firmware with:
+The idea
+--------
 
-* **Dual-core FreeRTOS architecture** - Optimized task allocation across cores
-* **Audio DMA pipeline** - I2S audio capture with ESP-SR wake word detection
-* **Power management** - Sleep modes with multiple wake-up sources
-* **HTTPS OTA updates** - Secure over-the-air firmware updates
-* **Home Assistant integration** - MQTT auto-discovery
-* **Task watchdog** - Real-time task monitoring
-* **Thread-safe IPC** - Event-driven architecture
+The obvious way to get a DIY device into Google Home is to run Matter on the
+microcontroller. That works, but it is the hard road, and it turns out to be
+unnecessary.
 
-Quick Start
+**Google Home only ever needs to see a Matter bridge.** How that bridge gets
+its data is irrelevant to Google. So the microcontroller can speak plain MQTT,
+and the Raspberry Pi can do the bridging:
+
+.. code-block:: text
+
+        Google Home app  ·  Nest speaker
+                    │  Matter (local only, QR pairing)
+        ┌───────────▼─────────────────────────────┐
+        │  Raspberry Pi                            │
+        │    Mosquitto   ← MQTT broker             │
+        │    Home Assistant                        │
+        │      └─ Matter bridge add-on             │
+        └───────────┬──────────────────────────────┘
+                    │  MQTT over WiFi 2.4 GHz
+        ┌───────────▼──────────────────────────────┐
+        │  ESP32-S3 nodes — sensors + actuators    │
+        └──────────────────────────────────────────┘
+
+What that buys:
+
+* **No recurring cost.** Test Matter vendor IDs are free. There is no cloud
+  project, no OAuth server, and no public HTTPS endpoint to host.
+* **Nothing exposed to the internet.** Matter is local, and so is MQTT.
+* **No Matter stack on the microcontroller.** The node stays a small MQTT
+  client, which leaves its flash and RAM for the actual job.
+* **It keeps working when the internet does not.** Control is local end to end.
+
+Status
+------
+
+This project is being built in phases. Being explicit about what is real
+matters, because an earlier version of this documentation described services
+that had been deleted.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 30 58
+
+   * - Phase
+     - Scope
+     - State
+   * - 1
+     - Target ESP32-S3, dual-slot OTA, clear dead weight
+     - Complete in firmware. Not yet run on hardware.
+   * - 2
+     - MQTT, Home Assistant discovery, NVS provisioning
+     - Complete in firmware. No broker has been contacted yet.
+   * - 3
+     - Sensors
+     - Not started
+   * - 4
+     - Google Home via the Matter bridge
+     - Not started
+   * - 5
+     - Actuators
+     - Not started
+   * - 6
+     - nRF5340 Thread sensor node
+     - Not started
+   * - 7
+     - OTA hardening
+     - Not started
+
+``ROADMAP.md`` in the repository root tracks this in detail, including the
+verification checklist that has to pass before Phase 1 can be called done.
+
+What it runs on
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 72
+
+   * - Component
+     - Notes
+   * - ESP32-S3-DevKitC-1 (N16R8)
+     - 16 MB flash, 8 MB octal PSRAM. Sensor and actuator nodes.
+   * - Raspberry Pi
+     - Mosquitto, Home Assistant, and the Matter bridge. The hub.
+   * - nRF5340 DK
+     - Reserved for a battery-powered Thread sensor node, later.
+   * - ESP-IDF v5.5.1
+     - The firmware toolchain.
+
+Quick start
 -----------
 
 .. code-block:: bash
 
-   # Setup environment
-   ./make.sh setup
+   ./make.sh setup          # check toolchain, install Python deps
+   ./make.sh build          # build for ESP32-S3
+   ./make.sh smoke          # verify the image before flashing it
+   ./make.sh flash-monitor  # flash and open the serial console
 
-   # Build project
-   ./make.sh build
+Then provision the node over that console:
 
-   # Flash and monitor
-   ./make.sh flash-monitor
+.. code-block:: text
 
-Features
---------
+   esp32> wifi_set <ssid> <password>
+   esp32> mqtt_set <broker-host> [port]
+   esp32> mqtt_device <device_id> <name> [room]
+   esp32> reboot
 
-.. list-table::
-   :header-rows: 1
-
-   * - Feature
-     - Description
-   * - Multi-Core Design
-     - Core 0: Networking (WiFi, MQTT, OTA). Core 1: Application (Audio, State Machine)
-   * - Audio Pipeline
-     - I2S DMA capture with ring buffer, ESP-SR wake word detection
-   * - Power Management
-     - NORMAL, MODEM_SLEEP, LIGHT_SLEEP modes with wake-up sources
-   * - OTA Updates
-     - HTTPS OTA with progress reporting and rollback protection
-   * - Home Assistant
-     - MQTT auto-discovery, QoS 0 communication
-   * - Task Watchdog
-     - Monitors 5 critical tasks with safe reset on timeout
-
-Architecture Overview
----------------------
-
-The system uses an event-driven architecture with:
-
-* **EventBus**: Central IPC system using FreeRTOS queues
-* **State Machines**: Application and Audio state coordination
-* **Services**: Decoupled services communicating via events
-* **Drivers**: Hardware abstraction layer
-
-.. figure:: _static/architecture-overview.svg
-   :alt: System Architecture
-   :align: center
-
-   System Architecture Overview
+Credentials live in NVS, not in the firmware image. See
+:doc:`getting-started` for the full walkthrough.
 
 Indices and tables
 ==================
@@ -87,4 +150,3 @@ Indices and tables
 * :ref:`genindex`
 * :ref:`modindex`
 * :ref:`search`
-

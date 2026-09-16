@@ -43,12 +43,13 @@ html_static_path = ['_static']
 # html_favicon = '_static/favicon.ico'
 
 # Theme options
+# 'display_version' was removed -- modern sphinx_rtd_theme dropped it and
+# warns "unsupported theme option" on every build, which now fails CI since
+# docs are built with -W.
 html_theme_options = {
-    'logo_only': False, 
-    'display_version': True,
+    'logo_only': False,
     'prev_next_buttons_location': 'bottom',
     'style_external_links': False,
-    'vcs_pageview_mode': '',
     'style_nav_header_background': '#2980B9',
     # Toc options
     'collapse_navigation': True,
@@ -57,6 +58,26 @@ html_theme_options = {
     'includehidden': True,
     'titles_only': False
 }
+
+# Excluded from the built site:
+#   README.md / DEPLOYMENT.md  -- README documents this directory rather than
+#     the product, and DEPLOYMENT.md duplicates deployment.rst.
+#   api/*.rst for removed components -- the EventBus, PowerManager,
+#     WatchdogSupervisor, audio pipeline and OLED driver no longer exist. The
+#     files remain in the repository as a record but would otherwise trip the
+#     "not included in any toctree" warning, which fails CI (docs build with -W).
+exclude_patterns = [
+    'README.md',
+    'DEPLOYMENT.md',
+    'api/eventbus.rst',
+    'api/powermanager.rst',
+    'api/watchdog.rst',
+    'api/audio.rst',
+    'api/oled.rst',
+    '_build',
+    'Thumbs.db',
+    '.DS_Store',
+]
 
 # -- Extension configuration -------------------------------------------------
 
