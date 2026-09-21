@@ -126,8 +126,21 @@ Troubleshooting
 Confirm ``CONFIG_SPIRAM_MODE_OCT=y`` in ``sdkconfig`` -- the N16R8 has octal
 PSRAM, and the Kconfig default is quad.
 
-**``idf.py: command not found``.** The ESP-IDF environment is not sourced:
-``. ~/esp/esp-idf/export.sh``.
+**``idf.py: command not found``.** The ESP-IDF environment is not sourced in
+this shell:
+
+.. code-block:: bash
+
+   . ~/esp/esp-idf/export.sh      # affects only the current shell
+
+You do not need it for the usual work: ``./make.sh`` sources ESP-IDF itself, so
+``./make.sh build`` and friends work from a shell that has never seen
+``export.sh``. Reach for ``idf.py`` directly only for things the script does
+not wrap, and source first when you do.
+
+Note also that sourcing does not persist across terminals, and that ``zsh``
+and ``bash`` keep separate environments -- a shell where ``idf.py`` works
+yesterday may not be the shell you are in today.
 
 **The board boots but never connects.** Check ``mqtt_status`` for a missing
 broker host, and confirm the broker is reachable from the same subnet.

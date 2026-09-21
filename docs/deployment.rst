@@ -72,13 +72,19 @@ cloud and no HTTPS.
 Kconfig option the firmware deliberately does *not* carry in its normal
 configuration, because ESP-IDF's own help warns it means "accepting firmware
 upgrade image from server with fake identity" -- anyone on the network path
-could substitute what your device installs. It lives in a separate file:
+could substitute what your device installs. It lives in a separate file, and
+this command is the only thing that applies it:
 
 .. code-block:: bash
 
-   rm -f sdkconfig
-   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ota-test.defaults" build
+   ./make.sh build-ota-test
    ./make.sh flash-monitor
+
+The command regenerates ``sdkconfig`` first, because ``SDKCONFIG_DEFAULTS`` is
+only consulted when that file is created -- without it an existing
+``sdkconfig`` keeps its old values and the build silently comes out unchanged.
+It also prints whether plain-HTTP OTA ended up enabled, so the image's
+configuration is never a guess.
 
 **2. Make the version change.**
 
@@ -90,7 +96,7 @@ before building the *second* image:
 .. code-block:: bash
 
    git commit --allow-empty -m "ota test: v2"
-   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ota-test.defaults" build
+   ./make.sh build-ota-test
 
 **3. Serve it.**
 
@@ -116,9 +122,11 @@ version actually changed -- a device that merely reconnects is not evidence.
 
 .. code-block:: bash
 
-   rm -f sdkconfig && idf.py build
+   ./make.sh build-production
 
-which drops ``ESP_HTTPS_OTA_ALLOW_HTTP`` and puts you back on HTTPS-only.
+which drops ``ESP_HTTPS_OTA_ALLOW_HTTP`` and puts you back on HTTPS-only. It
+reports which state it ended in, so there is no ambiguity about what is
+currently flashed.
 
 .. note::
 
