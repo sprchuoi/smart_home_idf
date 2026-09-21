@@ -10,6 +10,7 @@
 #include <string>
 
 #include "cJSON.h"
+#include "core/console/Console.h"
 #include "nvs_flash.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
@@ -70,6 +71,11 @@ bool Application::initialize() {
         ESP_LOGE(TAG, "Failed to initialize MqttConfigInterface");
         return false;
     }
+
+    // Replace esp_console's flat alphabetical `help` with one that groups
+    // commands by feature. Must run after every feature has registered its
+    // commands, or the listing will be missing whichever registered later.
+    console::install();
 
     // --- WiFi ----------------------------------------------------------------
     // Credentials live in NVS, provisioned at runtime over the console. A node

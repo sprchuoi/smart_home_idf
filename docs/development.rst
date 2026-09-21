@@ -36,6 +36,54 @@ Adding a service
 5. If it has device-specific configuration, put it in NVS behind a console
    command, following ``MqttConfigInterface`` as the template.
 
+Adding a console command
+------------------------
+
+Commands are declared in a table and registered as a group, so a feature owns
+its commands and adding one is a single entry. Write the handler:
+
+.. code-block:: cpp
+
+   static int consoleThreshold(int argc, char** argv) {
+       if (!console::requireArgs(argc, 2, "sensor_threshold <value>")) {
+           return 1;
+       }
+       ... // do the work
+       return 0;
+   }
+
+then add it to the feature's table:
+
+.. code-block:: cpp
+
+   static const console::Command COMMANDS[] = {
+       {"sensor_status",
+        "Show sensor status",
+        nullptr,                       // no usage line needed
+        &SensorService::consoleStatus},
+
+       {"sensor_threshold",
+        "Set the reporting threshold\nUsage: sensor_threshold <value>",
+        "sensor_threshold <value>",    // shown while typing
+        &SensorService::consoleThreshold},
+   };
+
+   console::addFeature("sensor", COMMANDS, std::size(COMMANDS));
+
+Notes worth knowing:
+
+* **The table must have static storage duration** -- the registry holds it by
+  pointer. A local ``static const`` inside the registration function is the
+  usual place, and keeps private handlers private.
+* ``help`` and ``hint`` may be ``nullptr``. ``help`` may contain newlines; every
+  line is printed under the name, indented.
+* The **feature name is only used for the grouped listing**; it does not prefix
+  command names. Commands are flat (``sensor_status``, not ``sensor status``)
+  because esp_console completes per registered command -- subcommands would
+  complete only as far as the feature name.
+* ``console::install()`` replaces esp_console's flat alphabetical ``help`` with
+  the grouped one, and must be called **after every feature has registered**.
+
 Adding a telemetry channel
 --------------------------
 

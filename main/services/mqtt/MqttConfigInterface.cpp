@@ -4,10 +4,12 @@
  */
 
 #include "MqttConfigInterface.h"
+#include "core/console/Console.h"
 
 #include "esp_mac.h"
 #include <cstring>
 #include <cstdio>
+#include <iterator>
 
 const char* MqttConfigInterface::TAG = "MqttConfig";
 const char* MqttConfigInterface::NVS_NAMESPACE = "mqtt_config";
@@ -268,70 +270,47 @@ void MqttConfigInterface::printStatus() {
 }
 
 bool MqttConfigInterface::registerConsoleCommands() {
-    esp_console_cmd_t cmd;
+    // Local static: the registry holds the table by pointer, so it must have
+    // static storage duration. Declaring it here rather than at file scope
+    // keeps the handlers private and the table next to where it is used.
+    static const console::Command COMMANDS[] = {
+        {"mqtt_set",
+         "Set MQTT broker\nUsage: mqtt_set <host> [port]",
+         "mqtt_set <host> [port]",
+         &MqttConfigInterface::consoleSet},
 
-    cmd = {
-        .command = "mqtt_set",
-        .help = "Set MQTT broker\nUsage: mqtt_set <host> [port]",
-        .hint = NULL,
-        .func = &MqttConfigInterface::consoleSet,
-        .argtable = NULL
+        {"mqtt_auth",
+         "Set MQTT credentials\nUsage: mqtt_auth <username> <password>",
+         "mqtt_auth <username> <password>",
+         &MqttConfigInterface::consoleAuth},
+
+        {"mqtt_device",
+         "Set device identity\nUsage: mqtt_device <device_id> <name> [room]\n"
+         "device_id: lowercase letters, digits, '-' and '_' only",
+         "mqtt_device <device_id> <name> [room]",
+         &MqttConfigInterface::consoleDevice},
+
+        {"mqtt_ota_url",
+         "Set the default OTA image URL\nUsage: mqtt_ota_url <url>",
+         "mqtt_ota_url <url>",
+         &MqttConfigInterface::consoleOtaUrl},
+
+        {"mqtt_status",
+         "Show MQTT configuration",
+         nullptr,
+         &MqttConfigInterface::consoleStatus},
+
+        {"mqtt_clear",
+         "Erase MQTT configuration",
+         nullptr,
+         &MqttConfigInterface::consoleClear},
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 
-    cmd = {
-        .command = "mqtt_auth",
-        .help = "Set MQTT credentials\nUsage: mqtt_auth <username> <password>",
-        .hint = NULL,
-        .func = &MqttConfigInterface::consoleAuth,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    cmd = {
-        .command = "mqtt_device",
-        .help = "Set device identity\nUsage: mqtt_device <device_id> <name> [room]\n"
-                "device_id: lowercase letters, digits, '-' and '_' only",
-        .hint = NULL,
-        .func = &MqttConfigInterface::consoleDevice,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    cmd = {
-        .command = "mqtt_ota_url",
-        .help = "Set the default OTA image URL\nUsage: mqtt_ota_url <url>",
-        .hint = NULL,
-        .func = &MqttConfigInterface::consoleOtaUrl,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    cmd = {
-        .command = "mqtt_status",
-        .help = "Show MQTT configuration",
-        .hint = NULL,
-        .func = &MqttConfigInterface::consoleStatus,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    cmd = {
-        .command = "mqtt_clear",
-        .help = "Erase MQTT configuration",
-        .hint = NULL,
-        .func = &MqttConfigInterface::consoleClear,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    ESP_LOGI(TAG, "Console commands registered");
-    return true;
+    return console::addFeature("mqtt", COMMANDS, std::size(COMMANDS));
 }
 
 int MqttConfigInterface::consoleSet(int argc, char** argv) {
-    if (argc < 2) {
-        printf("Usage: mqtt_set <host> [port]\n");
+    if (!console::requireArgs(argc, 2, "mqtt_set <host> [port]")) {
         return 1;
     }
     const uint16_t port = (argc >= 3) ? (uint16_t)atoi(argv[2]) : 1883;
@@ -341,8 +320,7 @@ int MqttConfigInterface::consoleSet(int argc, char** argv) {
 }
 
 int MqttConfigInterface::consoleAuth(int argc, char** argv) {
-    if (argc < 3) {
-        printf("Usage: mqtt_auth <username> <password>\n");
+    if (!console::requireArgs(argc, 3, "mqtt_auth <username> <password>")) {
         return 1;
     }
     const bool ok = getInstance().setCredentials(argv[1], argv[2]);
@@ -352,8 +330,7 @@ int MqttConfigInterface::consoleAuth(int argc, char** argv) {
 }
 
 int MqttConfigInterface::consoleDevice(int argc, char** argv) {
-    if (argc < 3) {
-        printf("Usage: mqtt_device <device_id> <name> [room]\n");
+    if (!console::requireArgs(argc, 3, "mqtt_device <device_id> <name> [room]")) {
         return 1;
     }
     if (!isValidDeviceId(argv[1])) {
@@ -371,8 +348,7 @@ int MqttConfigInterface::consoleDevice(int argc, char** argv) {
 }
 
 int MqttConfigInterface::consoleOtaUrl(int argc, char** argv) {
-    if (argc < 2) {
-        printf("Usage: mqtt_ota_url <url>\n");
+    if (!console::requireArgs(argc, 2, "mqtt_ota_url <url>")) {
         return 1;
     }
     const bool ok = getInstance().setOtaUrl(argv[1]);

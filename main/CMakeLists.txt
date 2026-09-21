@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.cpp"
         "app/src/Application.cpp"
+        "core/console/Console.cpp"
         "core/statemachine/AppStateMachine.cpp"
         "services/wifi/WifiService.cpp"
         "services/wifi/WifiConfigInterface.cpp"

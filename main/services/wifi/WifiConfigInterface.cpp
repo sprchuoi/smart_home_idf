@@ -4,7 +4,10 @@
  */
 
 #include "WifiConfigInterface.h"
+#include "core/console/Console.h"
+
 #include <cstring>
+#include <iterator>
 
 const char* WifiConfigInterface::TAG = "WifiConfigInterface";
 const char* WifiConfigInterface::NVS_NAMESPACE = "wifi_config";
@@ -50,55 +53,37 @@ bool WifiConfigInterface::initialize() {
 }
 
 bool WifiConfigInterface::registerConsoleCommands() {
-    esp_console_cmd_t cmd;
+    // Local static: the registry holds the table by pointer, so it must have
+    // static storage duration. Declaring it here rather than at file scope
+    // keeps the handlers private and the table next to where it is used.
+    static const console::Command COMMANDS[] = {
+        {"wifi_set",
+         "Set WiFi SSID and password\nUsage: wifi_set <ssid> <password>",
+         "wifi_set <ssid> <password>",
+         &WifiConfigInterface::consoleSetBoth},
 
-    cmd = {
-        .command = "wifi_set",
-        .help = "Set WiFi SSID and password\nUsage: wifi_set <ssid> <password>",
-        .hint = NULL,
-        .func = &WifiConfigInterface::consoleSetBoth,
-        .argtable = NULL
+        {"wifi_ssid",
+         "Set WiFi SSID\nUsage: wifi_ssid <ssid>",
+         "wifi_ssid <ssid>",
+         &WifiConfigInterface::consoleSetSSID},
+
+        {"wifi_password",
+         "Set WiFi password\nUsage: wifi_password <password>",
+         "wifi_password <password>",
+         &WifiConfigInterface::consoleSetPassword},
+
+        {"wifi_status",
+         "Show WiFi configuration status",
+         nullptr,
+         &WifiConfigInterface::consoleStatus},
+
+        {"wifi_clear",
+         "Clear WiFi credentials",
+         nullptr,
+         &WifiConfigInterface::consoleClear},
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
 
-    cmd = {
-        .command = "wifi_ssid",
-        .help = "Set WiFi SSID\nUsage: wifi_ssid <ssid>",
-        .hint = NULL,
-        .func = &WifiConfigInterface::consoleSetSSID,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    cmd = {
-        .command = "wifi_password",
-        .help = "Set WiFi password\nUsage: wifi_password <password>",
-        .hint = NULL,
-        .func = &WifiConfigInterface::consoleSetPassword,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    cmd = {
-        .command = "wifi_status",
-        .help = "Show WiFi configuration status",
-        .hint = NULL,
-        .func = &WifiConfigInterface::consoleStatus,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    cmd = {
-        .command = "wifi_clear",
-        .help = "Clear WiFi credentials",
-        .hint = NULL,
-        .func = &WifiConfigInterface::consoleClear,
-        .argtable = NULL
-    };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
-
-    ESP_LOGI(TAG, "Console commands registered");
-    return true;
+    return console::addFeature("wifi", COMMANDS, std::size(COMMANDS));
 }
 
 bool WifiConfigInterface::setSSID(const char* ssid) {
@@ -269,8 +254,7 @@ bool WifiConfigInterface::setDefaultCredentials(const char* ssid, const char* pa
 
 // Console command handlers
 int WifiConfigInterface::consoleSetSSID(int argc, char **argv) {
-    if (argc < 2) {
-        printf("Usage: wifi_ssid <ssid>\n");
+    if (!console::requireArgs(argc, 2, "wifi_ssid <ssid>")) {
         return 1;
     }
 
@@ -284,8 +268,7 @@ int WifiConfigInterface::consoleSetSSID(int argc, char **argv) {
 }
 
 int WifiConfigInterface::consoleSetPassword(int argc, char **argv) {
-    if (argc < 2) {
-        printf("Usage: wifi_password <password>\n");
+    if (!console::requireArgs(argc, 2, "wifi_password <password>")) {
         return 1;
     }
 
@@ -299,8 +282,7 @@ int WifiConfigInterface::consoleSetPassword(int argc, char **argv) {
 }
 
 int WifiConfigInterface::consoleSetBoth(int argc, char **argv) {
-    if (argc < 3) {
-        printf("Usage: wifi_set <ssid> <password>\n");
+    if (!console::requireArgs(argc, 3, "wifi_set <ssid> <password>")) {
         return 1;
     }
 
