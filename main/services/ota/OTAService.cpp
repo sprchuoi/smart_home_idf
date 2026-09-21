@@ -7,6 +7,7 @@
 #include "error/ErrorHandler.h"
 
 #include "esp_app_desc.h"
+#include "esp_crt_bundle.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
@@ -79,6 +80,17 @@ void OTAService::runUpdate(const std::string& url) {
     // every real download: it caps the whole body, not one read.
     http.timeout_ms = 0;
 
+    // Verify the server against the CA bundle compiled into the image.
+    //
+    // This is not optional. esp_https_ota refuses to start unless one of
+    // cert_pem / use_global_ca_store / crt_bundle_attach is set --
+    // is_server_verification_enabled() checks exactly those three -- and
+    // returns ESP_ERR_INVALID_ARG otherwise. With none set, an https:// URL
+    // failed with the same opaque error as an http:// one, so the only way
+    // firmware could be updated at all was over plain HTTP: precisely
+    // backwards.
+    http.crt_bundle_attach = esp_crt_bundle_attach;
+
     esp_https_ota_config_t ota_config = {};
     ota_config.http_config = &http;
 
@@ -96,6 +108,29 @@ void OTAService::runUpdate(const std::string& url) {
     esp_err_t err = esp_https_ota_begin(&ota_config, &handle);
     if (err != ESP_OK || handle == nullptr) {
         ESP_LOGE(TAG, "esp_https_ota_begin failed: %s", esp_err_to_name(err));
+
+        if (err == ESP_ERR_INVALID_ARG) {
+            // esp_https_ota returns this when it cannot verify the server.
+            // The cause is almost always the URL scheme not matching what the
+            // image was built to accept, and the raw error says nothing about
+            // which way round the mismatch is.
+            if (url.rfind("http://", 0) == 0) {
+#if CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP
+                ESP_LOGE(TAG, "Unexpected: plain HTTP is enabled but the transfer "
+                              "was still refused. Check the URL is well formed.");
+#else
+                ESP_LOGE(TAG, "This image disables plain-HTTP OTA. Either serve over "
+                              "HTTPS, or build a bench image with "
+                              "'./make.sh build-ota-test'.");
+#endif
+            } else {
+                ESP_LOGE(TAG, "Could not establish trust for the HTTPS server. "
+                              "Most often the system clock is wrong and every "
+                              "certificate looks not-yet-valid; a device with no "
+                              "RTC needs the time set before HTTPS will work.");
+            }
+        }
+
         ErrorHandler::getInstance().reportError(ErrorCategory::OTA_ERROR, err,
                                                 "OTA begin failed");
         return;

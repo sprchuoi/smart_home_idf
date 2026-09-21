@@ -50,8 +50,20 @@ If a default URL is stored (``mqtt_ota_url``), an empty payload reuses it:
 
    mosquitto_pub -h <broker> -t smart_home/<device_id>/cmd/ota -m ''
 
-Progress is reported on the retained status topic. On success the node reboots
-into the new slot.
+Progress is reported on the response topic. On success the node reboots into
+the new slot.
+
+.. note::
+
+   **HTTPS requires a correct system clock.** The server is verified against
+   the CA bundle compiled into the image, and certificate validity is checked
+   against the device's clock. A board with no RTC starts at 1970, at which
+   point every certificate looks not-yet-valid and the handshake fails. Until
+   time is synchronised (SNTP), HTTPS OTA will not work even though the
+   configuration is correct -- this is a known gap, not a misconfiguration.
+
+   Plain HTTP over a bench network sidesteps it, which is what the test
+   procedure below is for.
 
 .. warning::
 
