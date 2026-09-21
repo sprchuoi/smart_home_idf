@@ -49,6 +49,18 @@ CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
 # programmed it, so the configured value was fiction.
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
 
+# --- Main task stack --------------------------------------------------------
+# The ESP-IDF default of 3584 bytes is not enough for this init path. It has to
+# carry: the esp_console REPL, NVS initialization, two NVS-backed config
+# interfaces that each register several console commands, and esp_wifi_init(),
+# which is itself stack-hungry.
+#
+# When it overflows, the crash lands *inside* esp_wifi_init with the message
+# "A stack overflow in task main has been detected" and a backtrace through
+# panic_abort and vTaskSwitchContext -- none of which points at the init path
+# that actually consumed the stack. The fix is not obvious from the failure.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 # --- WiFi credentials are deliberately NOT set here -------------------------
 # Provision at runtime over the serial console; credentials are stored in NVS:
 #

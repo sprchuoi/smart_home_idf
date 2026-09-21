@@ -1,15 +1,15 @@
 /**
  * @file MqttService.cpp
- * @brief MQTT client for Home Assistant
+ * @brief MQTT client for Smart_Server
  */
 
 #include "MqttService.h"
 #include "error/ErrorHandler.h"
 
-#include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_random.h"
 #include "esp_system.h"
 #include "esp_task_wdt.h"
@@ -20,39 +20,6 @@
 #include <cstring>
 
 const char* MqttService::TAG = "MqttService";
-
-namespace {
-
-/**
- * The Home Assistant `device` block shared by every entity, so they group under
- * one device card instead of appearing as unrelated entries.
- */
-cJSON* makeDeviceBlock(const MqttConfigInfo_st& cfg) {
-    cJSON* dev = cJSON_CreateObject();
-
-    cJSON* identifiers = cJSON_CreateArray();
-    cJSON_AddItemToArray(identifiers, cJSON_CreateString(cfg.device_id));
-    cJSON_AddItemToObject(dev, "identifiers", identifiers);
-
-    cJSON_AddStringToObject(dev, "name", cfg.name);
-    cJSON_AddStringToObject(dev, "manufacturer", "sprchuoi");
-    cJSON_AddStringToObject(dev, "model", "ESP32-S3 Smart Home Node");
-
-    const esp_app_desc_t* app = esp_app_get_description();
-    if (app != nullptr) {
-        cJSON_AddStringToObject(dev, "sw_version", app->version);
-    }
-
-    // suggested_area is only honoured the first time an entity appears, which
-    // is one reason discovery is republished on every connect.
-    if (cfg.room[0] != '\0') {
-        cJSON_AddStringToObject(dev, "suggested_area", cfg.room);
-    }
-
-    return dev;
-}
-
-}  // namespace
 
 MqttService::MqttService() = default;
 
@@ -82,9 +49,10 @@ bool MqttService::initialize(const MqttConfigInfo_st* cfg) {
 
     m_cfg = *cfg;
 
-    m_availability_topic = topicFor("availability");
-    m_status_topic       = topicFor("status");
-    m_command_topic      = topicFor("cmd/#");
+    m_status_topic   = topicFor("status");
+    m_command_topic  = topicFor("command");
+    m_response_topic = topicFor("response");
+    m_sensor_prefix  = topicFor("sensor") + "/";
 
     esp_mqtt_client_config_t mqtt_cfg = {};
 
@@ -103,17 +71,20 @@ bool MqttService::initialize(const MqttConfigInfo_st* cfg) {
     mqtt_cfg.session.keepalive = 30;
 
     // A persistent session means commands published while this node is
-    // rebooting are queued by the broker instead of lost. It is also why
-    // command publishing must not be retained -- see publishDiscovery().
+    // rebooting are queued by the broker instead of lost. The response topic
+    // is correspondingly not retained, so a stale acknowledgement cannot be
+    // replayed to the server on the next connect.
     mqtt_cfg.session.disable_clean_session = true;
 
-    // Without this the entity would advertise an availability topic that is
-    // never published, so Home Assistant would show it as unavailable forever.
-    mqtt_cfg.session.last_will.topic  = m_availability_topic.c_str();
-    mqtt_cfg.session.last_will.msg    = "offline";
-    mqtt_cfg.session.last_will.msg_len = 7;
-    mqtt_cfg.session.last_will.qos    = 1;
-    mqtt_cfg.session.last_will.retain = 1;
+    // The server tracks device.status, so the Last Will publishes an offline
+    // *status document* rather than a bare string. Without this the server
+    // would keep showing the node as online after it lost power.
+    static const char* const OFFLINE_STATUS = "{\"status\":\"offline\"}";
+    mqtt_cfg.session.last_will.topic   = m_status_topic.c_str();
+    mqtt_cfg.session.last_will.msg     = OFFLINE_STATUS;
+    mqtt_cfg.session.last_will.msg_len = (int)strlen(OFFLINE_STATUS);
+    mqtt_cfg.session.last_will.qos     = 1;
+    mqtt_cfg.session.last_will.retain  = 1;
 
     // We own the reconnect loop; see the header for why.
     mqtt_cfg.network.disable_auto_reconnect = true;
@@ -181,116 +152,71 @@ bool MqttService::publish(const char* topic, const char* payload, int qos, int r
     return true;
 }
 
-bool MqttService::publishState(const char* channel, const char* value) {
-    const std::string topic = topicFor(channel) + "/state";
-    return publish(topic.c_str(), value, 0, 0);
+bool MqttService::publishSensor(const char* channel, float value, const char* unit) {
+    const std::string topic = m_sensor_prefix + channel;
+    // {"value": n, "unit": "u"} is the shape the server's bridge stores; it
+    // reads `value` as a float and `unit` as a label.
+    char payload[64];
+    snprintf(payload, sizeof(payload), "{\"value\":%.2f,\"unit\":\"%s\"}",
+             (double)value, unit != nullptr ? unit : "");
+    return publish(topic.c_str(), payload, 0, 0);
 }
 
 bool MqttService::publishStatus(const char* json) {
     return publish(m_status_topic.c_str(), json, 1, 1);
 }
 
-bool MqttService::publishAvailability(bool online) {
-    return publish(m_availability_topic.c_str(), online ? "online" : "offline", 1, 1);
+bool MqttService::publishResponse(const char* json) {
+    return publish(m_response_topic.c_str(), json, 1, 0);
 }
 
-void MqttService::publishDiscovery() {
-    // Announces the entities that need no sensor hardware, so the whole
-    // pipeline can be proven end to end before Phase 3 adds real sensors.
-    auto emitSensor = [&](const char* object_id, const char* name,
-                          const char* state_topic, const char* device_class,
-                          const char* unit, const char* state_class,
-                          const char* entity_category) {
-        cJSON* o = cJSON_CreateObject();
+void MqttService::publishDeviceStatus() {
+    // The document Smart_Server keys off. Its bridge reads "status" for
+    // online/offline; on first sight it additionally reads "device_type" and
+    // "name" to register the device, and on later messages "firmware_version",
+    // "ip" and "rssi" to update it.
+    wifi_ap_record_t ap = {};
+    const int rssi = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ? ap.rssi : 0;
 
-        const std::string unique = std::string(m_cfg.device_id) + "_" + object_id;
-        cJSON_AddStringToObject(o, "name", name);
-        cJSON_AddStringToObject(o, "unique_id", unique.c_str());
-        cJSON_AddStringToObject(o, "object_id", unique.c_str());
-        if (device_class != nullptr)   cJSON_AddStringToObject(o, "device_class", device_class);
-        if (unit != nullptr)           cJSON_AddStringToObject(o, "unit_of_measurement", unit);
-        if (state_class != nullptr)    cJSON_AddStringToObject(o, "state_class", state_class);
-        if (entity_category != nullptr) cJSON_AddStringToObject(o, "entity_category", entity_category);
-        cJSON_AddStringToObject(o, "state_topic", state_topic);
-        cJSON_AddStringToObject(o, "availability_topic", m_availability_topic.c_str());
-        cJSON_AddStringToObject(o, "payload_available", "online");
-        cJSON_AddStringToObject(o, "payload_not_available", "offline");
-        cJSON_AddItemToObject(o, "device", makeDeviceBlock(m_cfg));
-
-        char* text = cJSON_PrintUnformatted(o);
-        if (text != nullptr) {
-            const std::string topic = std::string("homeassistant/sensor/") +
-                                      m_cfg.device_id + "/" + object_id + "/config";
-            publish(topic.c_str(), text, 1, 1);
-            cJSON_free(text);
+    char ip[16] = {};
+    esp_netif_t* netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (netif != nullptr) {
+        esp_netif_ip_info_t ip_info = {};
+        if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+            esp_ip4addr_ntoa(&ip_info.ip, ip, sizeof(ip));
         }
-        cJSON_Delete(o);
-    };
-
-    emitSensor("rssi", "WiFi Signal", (topicFor("rssi") + "/state").c_str(),
-               "signal_strength", "dBm", "measurement", "diagnostic");
-    emitSensor("heap", "Free Heap", (topicFor("heap") + "/state").c_str(),
-               nullptr, "B", "measurement", "diagnostic");
-    emitSensor("uptime", "Uptime", (topicFor("uptime") + "/state").c_str(),
-               "duration", "s", "total_increasing", "diagnostic");
-
-    // Connectivity, driven directly by the availability topic. This is the one
-    // entity that reports whether the node itself is reachable.
-    {
-        cJSON* o = cJSON_CreateObject();
-        const std::string unique = std::string(m_cfg.device_id) + "_link";
-        cJSON_AddStringToObject(o, "name", "Link");
-        cJSON_AddStringToObject(o, "unique_id", unique.c_str());
-        cJSON_AddStringToObject(o, "object_id", unique.c_str());
-        cJSON_AddStringToObject(o, "device_class", "connectivity");
-        cJSON_AddStringToObject(o, "entity_category", "diagnostic");
-        cJSON_AddStringToObject(o, "state_topic", m_availability_topic.c_str());
-        cJSON_AddStringToObject(o, "payload_on", "online");
-        cJSON_AddStringToObject(o, "payload_off", "offline");
-        cJSON_AddStringToObject(o, "availability_topic", m_availability_topic.c_str());
-        cJSON_AddStringToObject(o, "payload_available", "online");
-        cJSON_AddStringToObject(o, "payload_not_available", "offline");
-        cJSON_AddItemToObject(o, "device", makeDeviceBlock(m_cfg));
-
-        char* text = cJSON_PrintUnformatted(o);
-        if (text != nullptr) {
-            const std::string topic = std::string("homeassistant/binary_sensor/") +
-                                      m_cfg.device_id + "/link/config";
-            publish(topic.c_str(), text, 1, 1);
-            cJSON_free(text);
-        }
-        cJSON_Delete(o);
     }
+
+    char status[320];
+    snprintf(status, sizeof(status),
+             "{\"status\":\"online\",\"device_type\":\"sensor_node\","
+             "\"name\":\"%s\",\"firmware_version\":\"%s\",\"ip\":\"%s\","
+             "\"room\":\"%s\",\"uptime_s\":%lld,\"heap\":%u,\"rssi\":%d}",
+             m_cfg.name,
+             esp_app_get_description() ? esp_app_get_description()->version : "unknown",
+             ip,
+             m_cfg.room,
+             (long long)(esp_timer_get_time() / 1000000),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             rssi);
+    publishStatus(status);
 }
 
 void MqttService::onConnected() {
     m_backoff_ms = INITIAL_BACKOFF_MS;
 
-    // Birth message. The Last Will only covers death -- without this, Home
-    // Assistant gates every entity on an availability topic that would never
-    // carry "online".
-    publishAvailability(true);
+    // Birth message.
+    publishDeviceStatus();
 
-    // Republished on every connect, not just the first: it is how changes to
-    // name/room/software version propagate, and how a deleted retained topic
-    // recovers.
-    publishDiscovery();
+    // Home Assistant discovery is deliberately not published. Smart_Server
+    // does not run Home Assistant -- it is a FastAPI stack with its own
+    // database -- so discovery topics would be retained noise on its broker
+    // with nothing to consume them. It returns in the phase that settles the
+    // Google Home path; see ROADMAP.md.
 
-    // QoS 1: a command sent while this node was rebooting must not be lost.
+    // QoS 1, with a persistent session, so a command sent while this node was
+    // rebooting is queued by the broker rather than lost.
     esp_mqtt_client_subscribe(m_client, m_command_topic.c_str(), 1);
-
-    // Status, retained, so it survives a broker restart.
-    char status[256];
-    wifi_ap_record_t ap = {};
-    const int rssi = (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) ? ap.rssi : 0;
-    snprintf(status, sizeof(status),
-             "{\"fw\":\"%s\",\"uptime_s\":%lld,\"heap\":%u,\"rssi\":%d,\"reset_reason\":%d}",
-             esp_app_get_description() ? esp_app_get_description()->version : "unknown",
-             (long long)(esp_timer_get_time() / 1000000),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             rssi,
-             (int)esp_reset_reason());
-    publishStatus(status);
 
     ESP_LOGI(TAG, "Connected to %s:%u", m_cfg.host, (unsigned)m_cfg.port);
 }
@@ -304,10 +230,16 @@ void MqttService::eventHandler(void* handler_args, esp_event_base_t, int32_t eve
         case MQTT_EVENT_CONNECTED:
             self->m_connected.store(true);
             self->onConnected();
+            if (self->m_connection_cb) {
+                self->m_connection_cb(true);
+            }
             break;
 
         case MQTT_EVENT_DISCONNECTED:
             self->m_connected.store(false);
+            if (self->m_connection_cb) {
+                self->m_connection_cb(false);
+            }
             // Hand the reconnect to the service task: esp-mqtt documents that
             // client APIs other than publish/subscribe must not be called from
             // inside this handler.

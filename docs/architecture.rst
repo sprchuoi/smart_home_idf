@@ -114,65 +114,77 @@ Core 1; guessing now would just create a claim the code does not honour.
 MQTT interface
 --------------
 
-Topics are namespaced under ``smart_home/<device_id>/``.
+Topics are namespaced under ``smart_home/devices/<device_id>/``.
+
+The layout is dictated by **Smart_Server** (the ``Smart_Server`` submodule),
+whose MQTT bridge parses topics *positionally*: ``parts[2]`` is the device id
+and ``parts[3]`` the message type. The ``devices`` segment is therefore
+load-bearing, not decoration -- dropping it silently breaks the bridge.
 
 .. list-table::
    :header-rows: 1
-   :widths: 38 8 10 44
+   :widths: 40 8 10 42
 
    * - Topic
      - QoS
      - Retained
      - Purpose
-   * - ``smart_home/<id>/availability``
+   * - ``.../<id>/status``
      - 1
      - Yes
-     - ``online`` / ``offline``. Published on connect; the broker publishes
-       ``offline`` via the Last Will if the node dies.
-   * - ``smart_home/<id>/status``
-     - 1
-     - Yes
-     - JSON: firmware, uptime, heap, RSSI, reset reason.
-   * - ``smart_home/<id>/<channel>/state``
+     - Device document. The server reads ``status`` for online/offline, plus
+       ``device_type``/``name`` to register a new device and
+       ``firmware_version``/``ip``/``rssi`` to update one. The Last Will
+       publishes ``{"status":"offline"}`` here.
+   * - ``.../<id>/sensor/<channel>``
      - 0
      - No
-     - One telemetry value per channel.
-   * - ``smart_home/<id>/cmd/<target>``
+     - One reading: ``{"value": <n>, "unit": "<u>"}``. The server stores each
+       as a ``SensorData`` row keyed by the channel name.
+   * - ``.../<id>/command``
      - 1
      - No
-     - Inbound commands. Currently ``ota`` and ``reboot``.
+     - Inbound. JSON body with a ``command`` field: ``get_status``, ``reboot``,
+       or ``ota`` with an optional ``url``.
+   * - ``.../<id>/response``
+     - 1
+     - No
+     - Acknowledgement of a command, as JSON.
 
 QoS is chosen per class of traffic rather than fixed:
 
-* **Availability, discovery and status use QoS 1 and are retained**, because
-  all three have to survive a broker restart. A retained availability of
-  ``offline`` is also what stops Home Assistant showing stale data forever.
-* **Telemetry uses QoS 0 and is not retained.** A stale temperature reading has
-  no value, and QoS 1 telemetry on a node whose broker is unreachable simply
-  fills the outbox with unacknowledged publishes.
+* **Status uses QoS 1 and is retained**, so it survives a broker restart and
+  the server still knows the node's state after a broker bounce. Its Last Will
+  is what marks the device offline when it loses power.
+* **Sensor readings use QoS 0 and are not retained.** A stale temperature has no
+  value, and QoS 1 telemetry on a node whose broker is unreachable simply fills
+  the outbox with unacknowledged publishes.
 * **Commands use QoS 1**, and the session is persistent, so a command sent while
-  the node is rebooting is queued by the broker rather than dropped.
+  the node is rebooting is queued by the broker rather than dropped. Responses
+  are deliberately *not* retained, so a stale acknowledgement cannot be
+  replayed to the server on the next connect.
 
-Home Assistant discovery
-------------------------
+.. note::
 
-The node announces itself using MQTT discovery, publishing one retained config
-topic per entity under ``homeassistant/<component>/<id>/<object>/config``. Every
-entity carries a shared ``device`` block, so they group under a single device
-rather than appearing as unrelated entries.
+   Home Assistant discovery is **not** published. Smart_Server does not run
+   Home Assistant -- it is a FastAPI stack with its own database -- so
+   ``homeassistant/...`` config topics would be retained noise with nothing to
+   consume them. Discovery returns in the phase that settles the Google Home
+   path; see ``ROADMAP.md``.
 
-Discovery is republished on **every** connect, not just the first. That is how
-changes to the name, room or software version propagate, and how the node
-recovers if its retained topics are deleted.
+Device registration
+-------------------
 
-The entities that exist today are diagnostics, chosen because they need no
-sensor hardware -- which lets the whole pipeline be verified before any sensor
-is wired up:
+There is no separate pairing step. The server's MQTT bridge registers a device
+the first time it sees a ``status`` message for an unknown id, taking ``name``
+and ``device_type`` (or ``type``) from that message and defaulting the rest. An
+unprovisioned node therefore appears in the server's database the moment it
+connects.
 
-* ``Link`` -- connectivity, driven by the availability topic
-* ``WiFi Signal`` -- RSSI
-* ``Free Heap``
-* ``Uptime``
+The three readings the node publishes today -- ``rssi``, ``heap`` and
+``uptime`` -- were chosen because they need **no sensor hardware**. That lets
+the entire path be exercised -- broker, bridge, database, API -- before Phase 3
+attaches anything real.
 
 Provisioning
 ------------

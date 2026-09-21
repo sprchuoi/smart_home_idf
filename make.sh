@@ -7,17 +7,19 @@
 #   ./make.sh [command] [options]
 #
 # Commands:
-#   setup       - Setup development environment
-#   build       - Build the project
-#   clean       - Clean build artifacts
-#   flash       - Flash to the device
-#   monitor     - Monitor serial output
-#   test        - Run tests
-#   smoke       - Verify the built image (target, PSRAM, log level, OTA slots)
-#   doc         - Generate documentation
-#   ci          - Run CI/CD pipeline
-#   help        - Show this help message
-#   debug       - Start a debug session
+#   setup            - Setup development environment
+#   build            - Build the project (incremental)
+#   build-ota-test   - Build with plain-HTTP OTA enabled (bench only)
+#   build-production - Build with the production config, stripping OTA test settings
+#   clean            - Clean build artifacts
+#   flash            - Flash to the device
+#   monitor          - Monitor serial output
+#   test             - Run tests
+#   smoke            - Verify the built image (target, PSRAM, log level, OTA slots)
+#   doc              - Generate documentation
+#   ci               - Run CI/CD pipeline
+#   help             - Show this help message
+#   debug            - Start a debug session
 ###############################################################################
 
 set -e  # Exit on error
@@ -195,6 +197,63 @@ build_project() {
         print_error "Build failed - binary not found"
         return 1
     fi
+}
+
+# Build with sdkconfig.ota-test.defaults layered on top.
+#
+# That extra file exists solely to set CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP, which
+# esp_https_ota requires before it will fetch a plain http:// URL. ESP-IDF's
+# own help warns it means accepting firmware from a server with a fake
+# identity, so it is kept out of sdkconfig.defaults and out of any release
+# image -- this command is the only thing that pulls it in.
+#
+# sdkconfig is deleted first because SDKCONFIG_DEFAULTS is only consulted when
+# sdkconfig is generated. Without that, an existing sdkconfig silently keeps
+# its old values and the build comes out unchanged.
+build_ota_test() {
+    print_info "Building firmware with OTA bench-test configuration..."
+    print_warning "Plain HTTP OTA enabled -- bench use only, never for release"
+
+    rm -f "$PROJECT_DIR/sdkconfig"
+    build_with_defaults "sdkconfig.defaults;sdkconfig.ota-test.defaults"
+}
+
+# Strip the bench configuration and go back to a production build.
+build_production() {
+    print_info "Building firmware with the production configuration..."
+
+    rm -f "$PROJECT_DIR/sdkconfig"
+    build_with_defaults "sdkconfig.defaults"
+}
+
+build_with_defaults() {
+    local defaults="$1"
+
+    if ! check_esp_idf; then
+        print_error "ESP-IDF not found. Run './make.sh setup' first"
+        return 1
+    fi
+
+    source_esp_idf
+    cd "$PROJECT_DIR"
+
+    if ! idf.py -DSDKCONFIG_DEFAULTS="$defaults" build; then
+        print_error "Build failed"
+        return 1
+    fi
+
+    if [ ! -f "$BUILD_DIR/smart_home.bin" ]; then
+        print_error "Build reported success but no binary at $BUILD_DIR/smart_home.bin"
+        return 1
+    fi
+
+    print_success "Built $BUILD_DIR/smart_home.bin"
+    grep -E '^CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP' "$PROJECT_DIR/sdkconfig" \
+        | grep -q '=y' \
+        && print_warning "Plain HTTP OTA is ENABLED in this image" \
+        || print_info "Plain HTTP OTA is disabled (production)"
+
+    idf.py size 2>/dev/null | grep -E '^Total image size|^Used static|smallest' || true
 }
 
 clean_build() {
@@ -529,18 +588,20 @@ ESP32-S3 Smart Home - Build Script
 Usage: ./make.sh [command] [options]
 
 Commands:
-  setup          Setup development environment
-  build          Build the project
-  clean          Clean build artifacts
-  flash          Flash to the device
-  monitor        Monitor serial output
-  flash-monitor  Flash and monitor
-  test           Run tests
-  smoke          Verify the built image (target, PSRAM, log level, OTA slots)
-  doc            Generate documentation
-  ci             Run CI/CD pipeline
-  help           Show this help message
-  debug          Start a debug session
+  setup            Setup development environment
+  build            Build the project (incremental)
+  build-ota-test   Build with plain-HTTP OTA enabled (bench only)
+  build-production Build with the production config, stripping OTA test settings
+  clean            Clean build artifacts
+  flash            Flash to the device
+  monitor          Monitor serial output
+  flash-monitor    Flash and monitor
+  test             Run tests
+  smoke            Verify the built image (target, PSRAM, log level, OTA slots)
+  doc              Generate documentation
+  ci               Run CI/CD pipeline
+  help             Show this help message
+  debug            Start a debug session
 
 Environment Variables:
   IDF_PATH       ESP-IDF installation path (default: ~/esp/esp-idf)
@@ -550,6 +611,8 @@ Examples:
   ./make.sh build
   ./make.sh flash-monitor
   ./make.sh smoke
+  ./make.sh build-ota-test     # then flash, and test OTA over HTTP
+  ./make.sh build-production   # back to a release-shaped image
   ./make.sh ci
 EOF
 }
@@ -563,6 +626,12 @@ main() {
             ;;
         build)
             build_project
+            ;;
+        build-ota-test)
+            build_ota_test
+            ;;
+        build-production)
+            build_production
             ;;
         clean)
             clean_build

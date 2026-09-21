@@ -51,6 +51,9 @@ private:
     /// WiFi link-state changes. Drives MQTT start/stop and the app state.
     void onWifiEvent(const WifiQueueEvent& event);
 
+    /// Broker connection changes. Runs in the esp-mqtt task.
+    void onMqttConnection(bool connected);
+
     /// Commands arriving on smart_home/<id>/cmd/<target>.
     /// Runs in the esp-mqtt task: must not block.
     void onMqttCommand(const char* topic, size_t topic_len,
@@ -67,6 +70,10 @@ private:
 
     bool m_initialized = false;
     bool m_running = false;
+
+    /// Counts telemetry cycles, so the status document can be refreshed
+    /// periodically rather than only on connect.
+    uint32_t m_telemetry_ticks = 0;
 
     WifiConfigInfo_st m_wifi_cfg = {};
     MqttConfigInfo_st m_mqtt_cfg = {};

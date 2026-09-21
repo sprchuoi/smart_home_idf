@@ -44,17 +44,27 @@ and the Raspberry Pi can do the bridging:
 .. code-block:: text
 
         Google Home app  ·  Nest speaker
-                    │  Matter (local only, QR pairing)
+                    │  Matter   ← the hop still to be settled
         ┌───────────▼─────────────────────────────┐
-        │  Raspberry Pi                            │
-        │    Mosquitto   ← MQTT broker             │
-        │    Home Assistant                        │
-        │      └─ Matter bridge add-on             │
+        │  Raspberry Pi — Smart_Server             │
+        │    Mosquitto    ← MQTT broker            │
+        │    FastAPI        bridge, DB, REST, OTA  │
+        │    [ Matter bridge ]   ← not built yet   │
         └───────────┬──────────────────────────────┘
                     │  MQTT over WiFi 2.4 GHz
         ┌───────────▼──────────────────────────────┐
         │  ESP32-S3 nodes — sensors + actuators    │
         └──────────────────────────────────────────┘
+
+.. note::
+
+   The hub is `Smart_Server <https://github.com/sprchuoi/Smart_Server>`_, a
+   FastAPI stack with its own MQTT bridge, database and REST API. It does
+   **not** run Home Assistant.
+
+   That leaves one hop genuinely undecided: how the server's data becomes
+   something Google Home will accept. The options are covered in
+   ``ROADMAP.md``; nothing above the MQTT broker is built yet.
 
 What that buys:
 

@@ -1,0 +1,31 @@
+# OTA bench-test overrides -- NOT for production.
+#
+# Apply on top of sdkconfig.defaults, which means regenerating sdkconfig:
+#
+#     rm -f sdkconfig
+#     idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.ota-test.defaults" build
+#
+# To go back to a production configuration:
+#
+#     rm -f sdkconfig && idf.py build
+#
+# ---------------------------------------------------------------------------
+#
+# esp_https_ota refuses plain http:// URLs unless this is enabled, so without
+# it an OTA test against a local static file server fails before it starts --
+# and the error does not make the reason obvious.
+#
+# ESP-IDF's own help for this option is blunt about what it costs:
+#
+#     "It is highly recommended to keep HTTPS (along with server certificate
+#      validation) enabled. Enabling this option comes with potential risk of:
+#        - Non-encrypted communication channel with server
+#        - Accepting firmware upgrade image from server with fake identity"
+#
+# Which is to say: anyone on the network path can substitute the firmware this
+# device installs. That is acceptable on a bench with a device you can reflash
+# over USB, and nowhere else.
+#
+# It lives in its own file, rather than in sdkconfig.defaults, precisely so it
+# cannot be enabled by accident and cannot end up in a released image.
+CONFIG_ESP_HTTPS_OTA_ALLOW_HTTP=y
