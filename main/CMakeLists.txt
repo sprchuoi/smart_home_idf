@@ -4,6 +4,7 @@ idf_component_register(
         "app/src/Application.cpp"
         "core/console/Console.cpp"
         "core/statemachine/AppStateMachine.cpp"
+        "core/system/SystemCommands.cpp"
         "services/wifi/WifiService.cpp"
         "services/wifi/WifiConfigInterface.cpp"
         "services/mqtt/MqttService.cpp"

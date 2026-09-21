@@ -106,7 +106,14 @@ If you skip this step, an id is derived from the factory MAC as
 .. code-block:: text
 
    esp32> mqtt_status
+   esp32> version
    esp32> reboot
+
+``version`` reports the running firmware, when it was built and why the device
+last reset -- worth checking after an OTA, since a reset reason of "power-on"
+following an update means the new image never actually ran.
+
+Run ``help`` at any point to list every command, grouped by feature.
 
 After rebooting you should see it associate, get an IP, and connect to the
 broker:

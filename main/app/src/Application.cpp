@@ -11,6 +11,7 @@
 
 #include "cJSON.h"
 #include "core/console/Console.h"
+#include "core/system/SystemCommands.h"
 #include "nvs_flash.h"
 #include "esp_console.h"
 #include "esp_heap_caps.h"
@@ -71,6 +72,9 @@ bool Application::initialize() {
         ESP_LOGE(TAG, "Failed to initialize MqttConfigInterface");
         return false;
     }
+
+    // Register the device-level commands (reboot, version).
+    system_commands::install();
 
     // Replace esp_console's flat alphabetical `help` with one that groups
     // commands by feature. Must run after every feature has registered its
