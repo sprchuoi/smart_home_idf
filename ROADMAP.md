@@ -218,18 +218,57 @@ status to offline within the keepalive window; a command from the server reaches
 
 ---
 
-## Phase 3 — Sensors
+## Phase 3 — Observing the data
 
-Currently 0 % built in either repo.
+Two halves: make the published data *visible* on the hub, and then make it *real*.
+
+### 3a. Smart_Server dashboard — DONE
+
+The ingest path was already working: the bridge stored every reading in the database, and
+`/api/devices/shnode-01/sensor-data` returned a hundred rows with correct units. **The display
+path was not.** Four bugs, all found by running the stack rather than reading it:
+
+- [x] **The bridge never broadcast anything.** `mqtt_bridge.py` wrote to the database and
+      stopped — it did not even import the WebSocket manager. The socket only ever carried its
+      connection greeting, so the dashboard could not learn that anything had happened short of
+      a manual reload. Proven by subscribing during a telemetry cycle and receiving nothing.
+- [x] **The dashboard never subscribed.** It handled `sensor_update` and `device_update` but
+      sent nothing over the socket, and `broadcast_to_topic` silently returns when a topic has
+      no subscribers — so even a fixed bridge would still have reached nobody.
+- [x] **`/` returned JSON, not the dashboard.** The UI was only reachable at
+      `/static/index.html`, which nothing advertised. Anyone visiting the server saw an API
+      blob and would reasonably conclude there was no dashboard. The descriptor moved to
+      `/info`.
+- [x] **An unopenable log file took down the whole service.** `logging.FileHandler` runs at
+      import time and raised `PermissionError` — a bind-mounted volume owned by another user
+      is enough, which is exactly what happens when a directory has been written by the
+      container as root and is then read by a local run. Losing the file log should cost the
+      file log, not the server.
+- [x] Added a global `devices` topic so a dashboard subscribes once rather than having to
+      learn every device id and subscribe per device.
+- [x] Dashboard rebuilt around the data: per-device stat tiles with sparklines, a KPI row, a
+      live-feed indicator that distinguishes "quiet" from "broken", and endpoints derived from
+      `window.location` instead of hardcoded IPs.
+
+**Verified end to end on live hardware**, not just built: live `sensor_update` messages
+observed over the socket from `shnode-01`; the render path driven with real payloads in node
+(formatting, sparklines, KPI counts, the divide-by-zero on a flat series, a single-point series
+correctly drawing no sparkline). One caveat: **no browser has rendered it** — the checks are
+of the HTML and JS, not of pixels.
+
+### 3b. Real sensors — BLOCKED on hardware
 
 - [ ] Thin sensor abstraction: `begin()`, `read()`, and a descriptor (unit, device class)
-- [ ] Drivers for sensors actually on hand — I2C, plus ADC/GPIO for binary inputs
+- [ ] Drivers for the sensors actually on hand — I2C, plus ADC/GPIO for binary inputs
 - [ ] Publish on change-of-state plus a periodic heartbeat
-- [ ] Correct `device_class` / `unit_of_measurement` / `state_class` in discovery
-- [ ] **Settle entity naming here**, before Phase 4. Some HAMH upgrades force a one-time
-      re-pair and lose controller room assignments.
+- [ ] A **simulated sensor** so the whole path is testable now: synthetic readings on a timer
+      through the identical publish path the real driver will use, which is how rssi/heap/uptime
+      already prove the chain end to end without hardware
+- [ ] **Settle channel naming here**, before Phase 4 — it becomes the topic segment *and* the
+      dashboard's tile label
 
-**Exit criteria:** real sensor values in HA, updating on cadence, surviving a broker restart.
+**Exit criteria:** real sensor values arriving in the dashboard, updating on cadence, surviving
+a broker restart.
 
 ---
 
