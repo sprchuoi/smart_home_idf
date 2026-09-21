@@ -81,7 +81,16 @@ void OTAService::runUpdate(const std::string& url) {
 
     esp_https_ota_config_t ota_config = {};
     ota_config.http_config = &http;
-    ota_config.partial_http_download = true;
+
+    // partial_http_download downloads the image over several HTTP requests,
+    // which requires the server to honour Range headers. Python's
+    // http.server -- the obvious thing to reach for when testing OTA -- does
+    // not: it answers 200 with the whole body and no Content-Range, so the
+    // transfer fails partway with no obvious cause.
+    //
+    // It buys memory efficiency we do not need for a ~1 MB image on a LAN, so
+    // it is off. Turn it on only against a server you know supports Range.
+    ota_config.partial_http_download = false;
 
     esp_https_ota_handle_t handle = nullptr;
     esp_err_t err = esp_https_ota_begin(&ota_config, &handle);

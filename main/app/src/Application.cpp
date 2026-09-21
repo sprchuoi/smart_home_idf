@@ -118,9 +118,18 @@ bool Application::initialize() {
             if (!m_mqtt_service.isConnected()) {
                 return;
             }
-            char status[48];
-            snprintf(status, sizeof(status), "{\"ota\":%d}", percent);
-            m_mqtt_service.publishStatus(status);
+            // Published on the *response* topic, not the status topic.
+            //
+            // Status is the retained device document the server reads for the
+            // device's name, firmware version and address. Writing OTA
+            // progress there would overwrite it with {"ota":N} and, for a
+            // device the server has not seen before, register one with no
+            // name and no type.
+            char progress[96];
+            snprintf(progress, sizeof(progress),
+                     "{\"command\":\"ota\",\"status\":\"progress\",\"percent\":%d}",
+                     percent);
+            m_mqtt_service.publishResponse(progress);
         });
     }
 
