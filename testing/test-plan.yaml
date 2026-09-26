@@ -1,0 +1,657 @@
+# testing/test-plan.yaml
+#
+# ESP32-S3 Smart Home — Phase 1 (/harness) test plan.
+#
+# WHAT THIS FILE IS
+#   The declaration layer: which test exists, what it verifies, where its
+#   executable lives, and what it produced. It is not the tests themselves —
+#   an entry with an empty `impl:` is the backlog, by design
+#   (build/references/test-design.md §5a, test-lifecycle.md §1).
+#
+# REQUIREMENT IDS ARE REAL
+#   `verifies:` cites the stable IDs in docs/Functionality/FSD.md (FR-x.y /
+#   NFR-x.y, chapters 5–19). Every ID below was read out of that file; none is
+#   invented. The FSD is version 0.1.0 with `approval_status: not approved`, so
+#   an ID may still move — a test entry survives that, an id reference does not.
+#
+# TIERS (FSD §21.0): host = dev machine/CI, no hardware · target = one
+#   ESP32-S3 board · bench = board + real peers (AP, broker, Smart_Server).
+#   "Current tier availability: none." (FSD §21.0) — no testbench Pi exists, no
+#   ESP32 is connected, no host test target is wired.
+#
+# STATUS SEMANTICS (test-lifecycle.md §1): not done | successful | failed.
+#   Blocked is COMPUTED from `needs:` against `capabilities:` — never typed.
+#   A missing capability is not a failure; a failure claims you learned
+#   something.
+
+schema: 1
+project: smart_home_idf
+updated: 2026-09-26
+updated_by: /harness (Phase 1, step 4)
+
+system_under_test: >-
+  main/ — the ESP32-S3 firmware in this repository, built with ESP-IDF v5.5.1
+  for the esp32s3 target. The DUT is the board plus this image.
+dut_hardware: "ESP32-S3-DevKitC-1 N16R8 — 16 MB flash, 8 MB octal PSRAM (FSD §2.2)"
+
+external_interfaces:
+  # DECLARED EXTERNAL — specified as interfaces the firmware depends on, never
+  # as system under test (docs/00-Overview.md; FSD §2.5).
+  - "MQTT broker (Mosquitto) on the hub"
+  - "Smart_Server — FastAPI + SQLite + dashboard (submodule Smart_Server/)"
+  - "Raspberry Pi hub"
+  - "Home Assistant + ha-matter-hub Matter bridge"
+  - "Google Home app / Nest speaker"
+
+fsd: docs/Functionality/FSD.md
+fsd_status: "0.1.0, approval_status: not approved (FSD document lifecycle)"
+fsd_acceptance_tests: "FSD §21.1 — AT-1 … AT-14; this plan's journey is the gate that AT-1/AT-2 depend on"
+testing_standard: docs/Method/standards/testing.md
+testing_standard_status: >-
+  NOT WRITTEN. Harness step 3 owns it (delegate: /define template
+  method/standards/testing.md). It belongs under docs/, which this session must
+  not write; the path above is where the plan expects it.
+traceability_outputs:
+  # FSD §21.2 — generated, never hand-maintained. Neither exists yet.
+  - tests/coverage-matrix.md
+  - tests/gaps.md
+
+phase: 1
+phase_name: "Harness (/harness)"
+wave: 1
+wave_name: "Build the running prototype"
+wave_gate: >-
+  Wave 1 writes `standard` tests only, and is open while any standard test is
+  red or unwritten. Waves 2 (deviation) and 3 (negative/security) are locked:
+  their tests are not written yet, and are by design not gaps
+  (test-design.md §5; test-lifecycle.md §2).
+next_phase_gate: >-
+  DUT ready (Phase 2, /commission). Until `dut-board` flips from unproven to
+  yes, no target- or bench-tier result means anything.
+
+position: >-
+  Phase 1, step 4/8 complete: plan declared, capabilities declared, journey
+  seeded. Every hardware-tier test is blocked on `dut-board: unproven` (no
+  board has ever run this image) and on `smart-server-stack: unproven` for the
+  dashboard checkpoint. The six build-gate entries are the only entries with a
+  recorded result.
+
+# ---------------------------------------------------------------------------
+# Capabilities
+#
+# Two kinds of entry, and they are not the same kind of claim:
+#   * source: bench    — declared by the testbench, taken at face value.
+#                        A project depends on the bench's quality, it never
+#                        proves it (harness/SKILL.md step 4; test-lifecycle §1).
+#                        `available: yes` is the declaration, not a measurement.
+#   * source: project  — this project's own equipment and state. `yes` only
+#                        with evidence; `unproven` = declared but never observed
+#                        doing its job HERE; `no` = it cannot be done.
+# ---------------------------------------------------------------------------
+capabilities:
+
+  # --- Bench (declared; a project never proves the bench) -------------------
+  bench-serial-flash:
+    source: bench
+    what: "Flash bootloader / partition table / app / ota_data to a USB slot"
+    available: yes
+  bench-serial-capture:
+    source: bench
+    what: "UART0 capture, including the boot output a reset returns; a recorder runs on every present slot whether or not anyone is watching"
+    available: yes
+  bench-serial-write:
+    source: bench
+    what: "Write to the DUT console without opening RFC2217 and without touching the control lines"
+    available: yes
+  bench-wifi-softap:
+    source: bench
+    what: "SoftAP with per-run generated SSID and passphrase"
+    available: yes
+  bench-wifi-events:
+    source: bench
+    what: "Station join/leave and DHCP-lease events on the SoftAP"
+    available: yes
+  bench-mqtt-broker:
+    source: bench
+    what: "Mosquitto test broker on the bench network"
+    available: yes
+  bench-human-interaction:
+    source: bench
+    what: "Blocking operator prompt (power cycle, cable swap) on the Pi display"
+    available: yes
+  bench-udp-log:
+    source: bench
+    what: "UDP debug-log receiver on port 5555"
+    available: yes
+
+  # --- This project's own equipment and state -------------------------------
+  dut-board:
+    source: project
+    what: "ESP32-S3-DevKitC-1 N16R8 running an image built from this repository"
+    available: unproven
+    why: >-
+      No board has ever executed this firmware. README.md: "Not yet on
+      hardware". ROADMAP.md hardware checklist: "Nothing has run on a board".
+      FSD §1.6: every requirement's evidence that exists is build-level only;
+      the corresponding on-target evidence does not exist.
+    consequence: >-
+      Every target- and bench-tier entry below is blocked. Agenda item 1;
+      /commission burns this down.
+  dut-udp-log:
+    source: project
+    what: "UDP debug log emitted by the DUT on port 5555"
+    available: no
+    why: >-
+      No UDP log module exists in main/ (main/CMakeLists.txt has no such
+      source), and FSD §17/§20 never asks for one. Harness step 5 wants UDP
+      logging always ("the loop's eyes inside the DUT"); the FSD's scope does
+      not carry it.
+    consequence: >-
+      All DUT log evidence for this project is UART0 serial capture. A crash
+      the firmware cannot report over serial has no witness.
+  smart-server-stack:
+    source: project
+    what: "Smart_Server FastAPI + SQLite + WebSocket dashboard (declared external interface)"
+    available: unproven
+    why: >-
+      The app container has never been built — deb.debian.org is unreachable
+      from its build container, so only the prebuilt Mosquitto container has
+      run (ROADMAP Phase 2). No browser has rendered the dashboard; the
+      Phase 3a checks were of HTML/JS, not pixels.
+    consequence: >-
+      JRN-07's dashboard checkpoint cannot be proven. The broker half of the
+      same step can be, which is why JRN-07 carries two required checkpoints.
+  ota-image-server:
+    source: project
+    what: "tools/ota/serve.py — static image server for bench OTA"
+    available: unproven
+    why: "The script exists but has never served an image to this board."
+    consequence: "No OTA entry is runnable; OTA is not in the Phase 1 journey."
+  home-assistant-matter-bridge:
+    source: project
+    what: "Home Assistant + ha-matter-hub bridging MQTT to Google Home"
+    available: no
+    why: >-
+      Not built. The route to Google Home is still an open decision
+      (FSD §4.6 OD-1; ROADMAP Open decisions #0).
+    consequence: >-
+      Google Home / Matter behaviour is outside every test in this plan. No
+      Phase 4 requirement may be reported verified.
+  ci-host-runner:
+    source: project
+    what: "GitHub-hosted ubuntu-latest running .github/workflows/ci.yml"
+    available: yes
+    evidence: >-
+      CI run 35614701971, conclusion success, workflow CI, branch main,
+      commit cb3f0322746719bbe173402256ea550093d3ceee, 2026-09-21T14:49:05Z.
+  self-hosted-runner:
+    source: project
+    what: "Per-repo [self-hosted, testbench] runner for the release-verify job"
+    available: unproven
+    why: "No runner is registered and no testbench Pi exists."
+    consequence: >-
+      The release-verify job has never run, so the Shipped gate cannot open
+      and a release would publish without the journey having run on the
+      released bytes.
+  release-verification:
+    source: project
+    what: "tag-triggered journey run against the released artifact"
+    available: unproven
+    why: "Depends on self-hosted-runner, which is unproven."
+    consequence: "Declared-but-unproven, recorded as such rather than assumed."
+
+# ---------------------------------------------------------------------------
+# Test data (test-design.md §7) — values, never secrets.
+# Generate per run so a match cannot occur by chance and a DUT using a cached
+# network is caught (testbench-test-handling rule 4).
+# ---------------------------------------------------------------------------
+test_data:
+  wifi_ssid: "generated per run, WB-<8 random hex>; must be <= 31 chars while OD-5/FR-7.7 is unmet"
+  wifi_password_ref: "env:WB_TEST_WIFI_PASSWORD"
+  mqtt_username_ref: "env:WB_TEST_MQTT_USERNAME"
+  mqtt_password_ref: "env:WB_TEST_MQTT_PASSWORD"
+  device_id: "generated per run, [a-z0-9_-]{1,24} (FR-14.1), e.g. sh-<6 hex>"
+  device_name: "generated per run, <= 32 chars (FR-10.9)"
+  broker: "the bench broker address; announce before the run, never bake into an image (FR-8.4)"
+  rule: "no secret appears in this plan, in a test spec, or in committed evidence — only references"
+
+# ---------------------------------------------------------------------------
+# The journey (test-design.md §5a) — a workflow test, one test per step.
+# Seeded from the user's approved journey in the Phase 1 harness session.
+# ---------------------------------------------------------------------------
+journeys:
+  - id: JRN
+    name: "One ordinary successful run: cold boot to a device visible in Smart_Server"
+    shape: workflow
+    order: [JRN-01, JRN-02, JRN-03, JRN-04, JRN-05, JRN-06, JRN-07]
+    is_the_gate: true
+    gate_rule: >-
+      While a journey step fails, later hardware results are unreadable — a
+      dozen reds, one cause. Fix the failing step and re-run from JRN-01; never
+      read a later step past a red one.
+    recovery: >-
+      After a partial or failed run: capture evidence first, then reset the DUT
+      (POST /api/serial/reset), clear retained MQTT state on the bench broker,
+      re-issue wifi_set/mqtt_set as the step requires, and re-run the whole
+      sequence from JRN-01. Never continue a half-run sequence.
+    partial_execution: >-
+      Steps are cumulative only in the sense that each re-establishes what the
+      previous left behind; each entry names its own precondition so it is
+      readable alone, and none of the atomic build-gate entries depends on a
+      journey step having run.
+    conflicts:
+      - id: JRN-06
+        kind: spec-vs-approved-journey
+        detail: >-
+          The user-approved journey wording ("Heartbeat every 2 s:
+          alive | wifi:up | ip:...") contradicts FSD NFR-17.4 and §17.4
+          (Heartbeat period 30000 ms) and OD-15 (the code's
+          "alive | state:… | wifi:… | mqtt:…" is authoritative; ROADMAP and
+          the approved list are stale). The code emits no `ip` field and logs
+          every 30 s. This plan records the approved wording and the FSD
+          requirement side by side; which one changes is a /define decision,
+          not this plan's. Until it is settled the assertion cannot be written.
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+tests:
+
+  # ===== Journey (workflow, ordered) =======================================
+  - id: JRN-01
+    group: journey
+    step: 1
+    name: "Cold boot reaches the application banner on an ESP32-S3"
+    shape: workflow
+    tier: target
+    kind: standard
+    wave: 1
+    verifies: [NFR-17.2, NFR-13.1]
+    observable: >-
+      A UART0 capture taken from reset contains the banner naming the firmware
+      and the IDF version — main.cpp logs "ESP32-S3 Smart Home" and
+      "ESP-IDF version: v5.5.1" — and the boot output names the chip as
+      esp32s3. The capture runs from the ROM banner to the app banner with no
+      reset loop between them.
+    setup: "DUT on a USB slot; nothing in NVS matters for this step."
+    cleanup: "None. This step provisions nothing and leaves no retained broker state."
+    needs: [bench-serial-flash, bench-serial-capture]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    notes: >-
+      Markers read from main/main.cpp lines 20–24. NFR-13.1's own contract is
+      host (build config, asserted by TC-BUILD-01); this entry supplies the
+      on-target half that FSD §1.6 lists under "Evidence that does not exist".
+      The exact bootloader line that names the chip must be recorded at first
+      bring-up rather than guessed.
+
+  - id: JRN-02
+    group: journey
+    step: 2
+    name: "PSRAM is detected as 8 MB octal and the boot continues"
+    shape: workflow
+    tier: target
+    kind: standard
+    wave: 1
+    verifies: [NFR-19.2]
+    observable: >-
+      The boot capture reports an 8 MB PSRAM device and the DUT continues to
+      the application banner instead of reset-looping. A wrong
+      CONFIG_SPIRAM_MODE_OCT produces a boot loop, not a build error, so this
+      step is the only place the build-level assertion can be confirmed.
+    seam: >-
+      NEEDED: no console command reports PSRAM today — `version` prints
+      firmware/build/IDF/uptime/reset only. A `version` or `mem` field giving
+      total PSRAM size would make this observable from the running firmware
+      without depending on IDF's esp_psram log wording. Obligation on
+      development, discovered at design time (test-design.md §8).
+    cleanup: "None."
+    needs: [bench-serial-flash, bench-serial-capture]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    contract_gap: >-
+      NFR-19.2's verification contract is `host` (inspect the generated config)
+      and §1.6 records "on-target boot" as evidence that does not exist. The
+      on-target observation this step asserts is therefore not demanded by any
+      requirement contract — a verification gap to take to /define, reported,
+      not silently absorbed.
+
+  - id: JRN-03
+    group: journey
+    step: 3
+    name: "The esp32> console prompt appears on UART0"
+    shape: workflow
+    tier: target
+    kind: standard
+    wave: 1
+    verifies: [FR-12.1, NFR-13.7, NFR-17.5]
+    observable: >-
+      "esp32>" appears on UART0 at 115200 8N1 and accepts a typed line; a
+      typed `version` returns the five labelled fields (FR-12.7).
+    setup: "DUT booted; NVS may be empty — FR-12.9 requires the REPL to be usable with no configuration."
+    cleanup: "None."
+    needs: [bench-serial-capture, bench-serial-write]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    notes: >-
+      Prompt set at main/app/src/Application.cpp:50 (repl_config.prompt);
+      console UART from ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT(). Agenda item 6
+      covers the command plumbing this step first exercises.
+
+  - id: JRN-04
+    group: journey
+    step: 4
+    name: "wifi_set provisions NVS, reboot associates, the DUT reports an IP"
+    shape: workflow
+    tier: bench
+    kind: standard
+    wave: 1
+    verifies: [FR-8.1, FR-8.2, FR-7.1, FR-7.6, FR-5.2]
+    observable: >-
+      After `wifi_set <generated ssid> <generated pass>` (which prints
+      "WiFi configured successfully … Restart to apply changes") and `reboot`:
+      the log shows "WiFi connection initiated" then "Got IP <dotted-quad>";
+      the bench AP's DHCP lease lists the DUT's station MAC on that address;
+      and the retained smart_home/devices/<id>/status document's `ip` equals
+      the leased address.
+    setup: >-
+      Bench SoftAP up with per-run generated credentials. Subscribe to
+      .../status before the reboot. Credentials from
+      env:WB_TEST_WIFI_PASSWORD.
+    cleanup: >-
+      wifi_clear on the console (expect the OD-4 defect, below), leave the AP
+      up for the next step, release no serial client.
+    needs: [bench-serial-write, bench-serial-capture, bench-wifi-softap, bench-wifi-events]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    notes: >-
+      `wifi_set` does not reboot itself — the step issues `reboot`.
+      Known code-level hazards this step meets first: OD-4 (`wifi_clear`
+      writes empty strings, so hasCredentials() stays true) and OD-5
+      (`Wifi_cfg.hpp` `char ssid[32]` cannot hold a 32-character SSID, so
+      FR-7.7 is "currently unmeetable"). Test data therefore uses an SSID of
+      31 characters or fewer, and the 32-character case is a boundary to
+      declare in a later wave, not to hide here.
+
+  - id: JRN-05
+    group: journey
+    step: 5
+    name: "mqtt_set + mqtt_device connect to the broker with no Last Will trip"
+    shape: workflow
+    tier: bench
+    kind: standard
+    wave: 1
+    verifies: [FR-10.1, FR-10.4, FR-9.9, FR-9.6, FR-9.3]
+    observable: >-
+      With a subscriber attached to smart_home/devices/<id>/status before the
+      DUT connects: the log shows
+      "Initialized for <host>:<port> as '<id>'" and "Connected to <host>:<port>";
+      the retained status document reads "status":"online"; and the Last Will
+      payload {"status":"offline"} is never published on that topic during the
+      observation window — the LWT is registered but does not trip.
+    setup: >-
+      Bench broker up; subscriber attached first, so the birth and any LWT are
+      both inside the window. Device id and name generated per run
+      (FR-14.1, FR-10.9).
+    cleanup: >-
+      Clear retained messages on .../status, .../sensor/* and .../response for
+      this device id; `mqtt_clear` on the console. A retained "online" left
+      behind makes the next run's LWT check read wrongly.
+    needs: [bench-serial-write, bench-serial-capture, bench-mqtt-broker]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    notes: >-
+      The broker is the bench mosquitto with allow_anonymous true
+      (tools/mqtt/mosquitto.conf). The firmware's dependence on that
+      assumption is agenda item 5 — it is a debugging question, not a test
+      entry. Authenticated-broker behaviour is NFR-18.6 / Phase 7 scope and is
+      deliberately not asserted here.
+
+  - id: JRN-06
+    group: journey
+    step: 6
+    name: "Heartbeat line reports link state on a cadence"
+    shape: workflow
+    tier: target
+    kind: standard
+    wave: 1
+    verifies: [NFR-17.4]
+    observable: >-
+      APPROVED JOURNEY WORDING (the user's list): "alive | wifi:up | ip:..."
+      on the console every 2 s.
+      IMPLEMENTED TODAY (Application.cpp:334, TELEMETRY_INTERVAL_MS=30000 at
+      Application.cpp:25): "alive | state:… | wifi:… | mqtt:…" every 30 s, with
+      no `ip` field.
+    assertion: >-
+      Withheld. Writing "every 2 s and carrying ip" would assert a behaviour
+      the FSD does not require; writing "every 30 s" would quietly drop the
+      user's approved step. The conflict is recorded in `journeys[0].conflicts`
+      and raised, not resolved here.
+    setup: "DUT in RUNNING, so wifi and mqtt both read up."
+    cleanup: "None."
+    needs: [bench-serial-capture]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    conflict: "FSD NFR-17.4 + §17.4 constants + OD-15 vs the approved journey wording; see journeys[0].conflicts."
+
+  - id: JRN-07
+    group: journey
+    step: 7
+    name: "State reaches the broker and the device appears in Smart_Server"
+    shape: workflow
+    tier: bench
+    kind: standard
+    wave: 1
+    verifies: [FR-6.1, FR-6.5, FR-6.6, FR-9.1]
+    observable: >-
+      CHECKPOINT A (broker): a subscriber sees the retained status document on
+      smart_home/devices/<id>/status carrying status, device_type, name,
+      firmware_version, ip, room, uptime_s, heap and rssi; and at least two
+      telemetry cycles arrive on .../sensor/{rssi,heap,uptime} with the units
+      dBm, B and s.
+      CHECKPOINT B (server): the Smart_Server dashboard at http://<host>:8000/
+      lists a device row for <id> with a live reading (FSD AT-1, AT-2).
+      Both checkpoints are required; A passing and B failing says the server
+      half is missing, not that the firmware is wrong.
+    setup: >-
+      Broker up; Smart_Server stack up on the hub; subscriber attached before
+      the DUT's first publish; wait at least one 30 s telemetry cycle plus the
+      retained status publish on connect (FR-6.5).
+    cleanup: >-
+      Clear retained state for this device id; leave the broker and the AP
+      running (testbench-test-handling: the portal and the broker are
+      always-on infrastructure — a test never starts, stops or restarts them).
+    needs: [bench-mqtt-broker, smart-server-stack, bench-serial-capture]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    notes: >-
+      Topic schema is the code's: smart_home/devices/<id>/… — the `devices`
+      segment is load-bearing because Smart_Server's bridge splits the topic
+      positionally (FSD §9.2, OD-6). ROADMAP.md and docs/deployment.rst still
+      show the old schema; do not write the test from them.
+      `mqtt_device`/`mqtt_set` provisioning is JRN-05's; this step assumes it.
+
+  # ===== Build gate (host/CI, standard) ====================================
+  # These are the project's only executable tests today. They are the existing
+  # CI step and `./make.sh smoke`, transcribed with real FSD ids — not invented
+  # here. `impl` is one CI step for the first six because that is what runs;
+  # the step prints a pass/fail line per check and fails as a unit.
+  - id: TC-BUILD-01
+    group: build-gate
+    name: "The build selects the esp32s3 target"
+    shape: atomic
+    tier: host
+    kind: standard
+    wave: 1
+    verifies: [NFR-13.1]
+    observable: "The generated sdkconfig contains CONFIG_IDF_TARGET=\"esp32s3\"."
+    needs: [ci-host-runner]
+    impl: ".github/workflows/ci.yml#verify-image-and-partition-layout"
+    local_equivalent: "./make.sh smoke"
+    status: successful
+    result:
+      commit: cb3f0322746719bbe173402256ea550093d3ceee
+      date: 2026-09-21T14:49:05Z
+      evidence: "gh run 35614701971 (workflow CI, main, conclusion success) — transcribed by /harness"
+      staleness: "recorded at cb3f032; source under main/ unchanged since, but the commit is not HEAD — re-run before trusting"
+
+  - id: TC-BUILD-02
+    group: build-gate
+    name: "The build selects 16 MB flash"
+    shape: atomic
+    tier: host
+    kind: standard
+    wave: 1
+    verifies: [NFR-19.1]
+    observable: "The generated sdkconfig contains CONFIG_ESPTOOLPY_FLASHSIZE=\"16MB\"."
+    needs: [ci-host-runner]
+    impl: ".github/workflows/ci.yml#verify-image-and-partition-layout"
+    local_equivalent: "./make.sh smoke"
+    status: successful
+    result:
+      commit: cb3f0322746719bbe173402256ea550093d3ceee
+      date: 2026-09-21T14:49:05Z
+      evidence: "gh run 35614701971 (workflow CI, main, conclusion success) — transcribed by /harness"
+      staleness: "recorded at cb3f032; re-run before trusting"
+
+  - id: TC-BUILD-03
+    group: build-gate
+    name: "The build selects octal PSRAM at 80 MHz"
+    shape: atomic
+    tier: host
+    kind: standard
+    wave: 1
+    verifies: [NFR-19.2]
+    observable: "The generated sdkconfig contains CONFIG_SPIRAM_MODE_OCT=y (and the 80 MHz speed)."
+    needs: [ci-host-runner]
+    impl: ".github/workflows/ci.yml#verify-image-and-partition-layout"
+    local_equivalent: "./make.sh smoke"
+    status: successful
+    result:
+      commit: cb3f0322746719bbe173402256ea550093d3ceee
+      date: 2026-09-21T14:49:05Z
+      evidence: "gh run 35614701971 (workflow CI, main, conclusion success) — transcribed by /harness"
+      staleness: "recorded at cb3f032; re-run before trusting"
+    notes: >-
+      This is the host half only. The on-target half is JRN-02; a green
+      TC-BUILD-03 says nothing about the board booting.
+
+  - id: TC-BUILD-04
+    group: build-gate
+    name: "Maximum log level is INFO, so ESP_LOGI is compiled in"
+    shape: atomic
+    tier: host
+    kind: standard
+    wave: 1
+    verifies: [NFR-17.1]
+    observable: "The generated sdkconfig contains CONFIG_LOG_MAXIMUM_LEVEL=3."
+    needs: [ci-host-runner]
+    impl: ".github/workflows/ci.yml#verify-image-and-partition-layout"
+    local_equivalent: "./make.sh smoke"
+    status: successful
+    result:
+      commit: cb3f0322746719bbe173402256ea550093d3ceee
+      date: 2026-09-21T14:49:05Z
+      evidence: "gh run 35614701971 (workflow CI, main, conclusion success) — transcribed by /harness"
+      staleness: "recorded at cb3f032; re-run before trusting"
+
+  - id: TC-BUILD-05
+    group: build-gate
+    name: "The generated partition table carries otadata, ota_0 and ota_1"
+    shape: atomic
+    tier: host
+    kind: standard
+    wave: 1
+    verifies: [NFR-19.4]
+    observable: >-
+      Parsing build/partition_table/partition-table.bin yields the labels
+      otadata, ota_0 and ota_1.
+    needs: [ci-host-runner]
+    impl: ".github/workflows/ci.yml#verify-image-and-partition-layout"
+    local_equivalent: "./make.sh smoke"
+    status: successful
+    result:
+      commit: cb3f0322746719bbe173402256ea550093d3ceee
+      date: 2026-09-21T14:49:05Z
+      evidence: "gh run 35614701971 (workflow CI, main, conclusion success) — transcribed by /harness"
+      staleness: "recorded at cb3f032; re-run before trusting"
+    notes: >-
+      Labels only. NFR-19.4 also demands the §19.1 offsets and sizes, and
+      NFR-19.8 the nvs size — both unasserted, declared as TC-BUILD-08.
+
+  - id: TC-BUILD-06
+    group: build-gate
+    name: "The application image fits a 4 MB OTA slot"
+    shape: atomic
+    tier: host
+    kind: standard
+    wave: 1
+    verifies: [NFR-19.5]
+    observable: "stat(build/smart_home.bin) is < 0x400000 bytes (the current build is ~838 KB)."
+    needs: [ci-host-runner]
+    impl: ".github/workflows/ci.yml#verify-image-and-partition-layout"
+    local_equivalent: "./make.sh smoke"
+    status: successful
+    result:
+      commit: cb3f0322746719bbe173402256ea550093d3ceee
+      date: 2026-09-21T14:49:05Z
+      evidence: "gh run 35614701971 (workflow CI, main, conclusion success) — transcribed by /harness"
+      staleness: "recorded at cb3f032; re-run before trusting"
+
+  # ===== Declared but not written (the backlog) ============================
+  # Empty `impl:` — these are how the backlog is computed, both directions
+  # (test-lifecycle.md §1). They are standard-kind and Wave 1, not wave-locked.
+  - id: TC-BUILD-07
+    group: build-gate
+    name: "Bootloader offset is 0x0 and the partition table is at 0x8000"
+    shape: atomic
+    tier: host
+    kind: standard
+    wave: 1
+    verifies: [NFR-19.3]
+    observable: "build/flash_args (or the merge-bin offsets) place the bootloader at 0x0 and the partition table at 0x8000."
+    needs: [ci-host-runner]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    notes: >-
+      No executable asserts this today: the CI verify step parses sdkconfig and
+      the partition-table binary but never reads flash_args.
+      On ESP32-S3 the bootloader is at 0x0 (0x1000 is ESP32/S2 only), so a
+      wrong offset here is a brick-shaped defect. This is a real backlog item,
+      not wave-locked.
+
+  - id: TC-BUILD-08
+    group: build-gate
+    name: "Partition offsets and sizes match §19.1, and nvs is 0x6000"
+    shape: atomic
+    tier: host
+    kind: standard
+    wave: 1
+    verifies: [NFR-19.4, NFR-19.8]
+    observable: >-
+      Parsing the generated partition table yields nvs 0x9000/0x6000,
+      otadata 0xf000/0x2000, phy_init 0x11000/0x1000, ota_0 0x20000/0x400000,
+      ota_1 0x420000/0x400000, storage 0x820000/0x7E0000.
+    needs: [ci-host-runner]
+    impl: ""
+    status: not done
+    not_done_reason: test not written
+    notes: >-
+      The existing check asserts label presence only. Offsets and sizes are
+      exactly what a real flash depends on (agenda item 3), and a CSV that
+      builds is not a table that boots.
+
+  # ===== Wave-locked (declared, never implemented in Wave 1) ================
+  # No entries yet. test-design.md §5: Wave 2 (deviation) and Wave 3
+  # (negative/security) tests are NOT written while Wave 1 is open — the one
+  # exception is a later-wave test that needs a capability or a seam, which is
+  # declared here the moment it is known. None is known yet. Do not report the
+  # empty bins as gaps.
