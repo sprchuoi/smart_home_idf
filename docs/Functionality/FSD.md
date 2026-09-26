@@ -31,7 +31,7 @@ state, accept a small command set, and update its own firmware over the air.
 The Google Home route is settled `[user]`: Home Assistant runs alongside
 Smart_Server on the Pi, and the `RiDDiX/home-assistant-matter-hub` add-on is the
 Matter bridge. The firmware does **not** speak Matter, Thread, or any Google
-protocol, and shall not be required to (FR-18.4). Rejected alternatives —
+protocol, and shall not be required to (NFR-18.4). Rejected alternatives —
 running Matter on the microcontroller, an Actions-on-Google/OAuth route, and a
 Matter bridge embedded in Smart_Server — are recorded in §4.5.
 
@@ -292,7 +292,7 @@ checkable. **A phase may use only what an earlier phase delivered.**
   Last Will, per-class QoS, owned backoff reconnect; command dispatch and
   acknowledgements; telemetry of `rssi`, `heap`, `uptime`.
 - **Requirements:** FR-5.2–FR-5.5, FR-5.10–FR-5.12, FR-6.1–FR-6.20,
-  FR-7.1–FR-7.7, FR-7.9, FR-9.1–FR-9.18, FR-16.1–FR-16.6.
+  FR-7.1–FR-7.7, FR-7.9, FR-9.1–FR-9.18, FR-16.1–FR-16.4, NFR-16.5, NFR-16.6.
 - **Deliverables:** a node that appears as a device row in Smart_Server, reports
   online/offline, publishes telemetry, and answers `get_status` and `reboot`.
 - **Exit criteria:** the device row appears in Smart_Server's database; pulling
@@ -534,7 +534,7 @@ each needs a user decision before it enters the FSD.
 
 | Proposal | Detected from | Why it might matter | Status |
 |---|---|---|---|
-| Offline telemetry buffering / replay | MQTT client present | A broker outage currently loses readings | Not adopted — FR-6.16 and NFR-9.16 currently specify the opposite |
+| Offline telemetry buffering / replay | MQTT client present | A broker outage currently loses readings | Not adopted — FR-6.16 and FR-9.16 currently specify the opposite |
 | Captive-portal provisioning | none in code | Provisioning is console-only; a portal is a common alternative | Not detected in code; not adopted |
 | Command acknowledgement tracking | response topic exists | Phase 5 needs proof the actuator moved, not just that the command arrived | Deferred to Phase 5 by `[user]` |
 | BLE provisioning/command channel | none in code | An alternative provisioning path | Not detected; not adopted |
@@ -642,7 +642,7 @@ reboot always starts from `INIT` (FR-5.8).
 - **WiFi unreachable:** `WIFI_CONNECTING` with bounded retries (FR-7.3, FR-7.4).
   After exhaustion the DUT stays alive and console-operable.
 - **Broker unreachable:** `MQTT_CONNECTING` with bounded backoff, retrying
-  indefinitely (FR-9.10). Telemetry is dropped, not buffered (NFR-9.16).
+  indefinitely (FR-9.10). Telemetry is dropped, not buffered (FR-9.16).
 - **OTA failure:** the state model does not change; the running image continues
   (FR-11.9).
 
