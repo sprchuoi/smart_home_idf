@@ -277,9 +277,9 @@ checkable. **A phase may use only what an earlier phase delivered.**
 - **Scope:** build for esp32s3 with the committed partition table; console REPL;
   NVS; the two config stores and their console commands; the application state
   holder; the image/partition smoke gate.
-- **Requirements:** FR-5.1, FR-5.6, FR-5.7, FR-5.8, FR-8.1–FR-8.4, FR-10.1–FR-10.9,
-  FR-12.1–FR-12.11, FR-14.1–FR-14.5, FR-15.1–FR-15.3, NFR-13.1–NFR-13.8,
-  NFR-17.1–NFR-17.5, NFR-19.1–NFR-19.8.
+- **Requirements:** FR-5.1, FR-5.6–FR-5.9, FR-8.1–FR-8.6, FR-8.8, FR-8.9,
+  FR-10.1–FR-10.10, FR-12.1–FR-12.11, FR-14.1–FR-14.5, NFR-13.1–NFR-13.9,
+  NFR-15.1–NFR-15.6, NFR-17.1–NFR-17.5, NFR-19.1–NFR-19.9.
 - **Deliverables:** a flashable image; provisioning commands; an honest smoke gate.
 - **Exit criteria:** on hardware, the board boots, prints the banner, presents
   the `esp32>` prompt, and accepts `wifi_set`/`mqtt_set` into NVS; `version`
@@ -291,8 +291,8 @@ checkable. **A phase may use only what an earlier phase delivered.**
 - **Scope:** WiFi station connect and reconnect; MQTT connect, retained status,
   Last Will, per-class QoS, owned backoff reconnect; command dispatch and
   acknowledgements; telemetry of `rssi`, `heap`, `uptime`.
-- **Requirements:** FR-5.2–FR-5.5, FR-6.1–FR-6.16, FR-7.1–FR-7.7, FR-9.1–FR-9.17,
-  FR-16.1–FR-16.5.
+- **Requirements:** FR-5.2–FR-5.5, FR-5.10–FR-5.12, FR-6.1–FR-6.20,
+  FR-7.1–FR-7.7, FR-7.9, FR-9.1–FR-9.18, FR-16.1–FR-16.6.
 - **Deliverables:** a node that appears as a device row in Smart_Server, reports
   online/offline, publishes telemetry, and answers `get_status` and `reboot`.
 - **Exit criteria:** the device row appears in Smart_Server's database; pulling
@@ -342,6 +342,8 @@ checkable. **A phase may use only what an earlier phase delivered.**
   acknowledgement tracking rather than assuming the relay moved.
 - **Requirements:** extends the command contract (FR-6.6–FR-6.12) with actuator
   verbs; written at design time.
+- **Deliverables:** at least one relay/switch node with retained state, an
+  acknowledged command path, and a declared actuator vocabulary.
 - **Exit criteria:** voice toggles a real load and the HA state matches physical
   reality after a node reboot or broker restart.
 - **Dependencies:** Phase 4 for the voice path, Phase 2 for the command path.
@@ -352,6 +354,9 @@ checkable. **A phase may use only what an earlier phase delivered.**
   border router with an RCP; pin a Zephyr version first (`smart_home_zephyr`
   tracks `revision: main` with no lock file).
 - **Requirements:** a separate FSD for that firmware; not this document.
+- **Deliverables:** a pinned Zephyr version and lock file in `smart_home_zephyr`,
+  a Thread border router in Home Assistant, and a battery-powered sleepy end
+  device publishing sensor data.
 - **Exit criteria:** a battery-powered nRF5340 sensor appears in HA and is
   controllable from Google Home.
 - **Dependencies:** Phase 4 (Home Assistant present). `[user]` deferred to a
@@ -363,8 +368,12 @@ checkable. **A phase may use only what an earlier phase delivered.**
   (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is unset today); **SNTP so the
   device clock is valid before an HTTPS handshake**; TLS on MQTT; broker
   authentication off-bench; watchdog coverage for every long-running task.
-- **Requirements:** FR-11.1–FR-11.12 today; rollback and SNTP requirements are
+- **Requirements:** FR-11.1–FR-11.15, NFR-11.13, NFR-11.14, NFR-18.3, NFR-18.4,
+  NFR-18.6, NFR-18.9, NFR-18.10; rollback and SNTP requirements are
   written when the values are chosen (OD-9, OD-11).
+- **Deliverables:** SNTP time synchronisation before any HTTPS handshake;
+  automatic rollback enabled and exercised; TLS on MQTT; broker authentication
+  off-bench; watchdog coverage stated for every long-running task.
 - **Exit criteria:** an OTA update ships **over HTTPS**, and a deliberately
   broken image rolls back.
 - **Dependencies:** Phase 2. **Sequencing defect resolved here:** the ROADMAP's
@@ -378,7 +387,10 @@ checkable. **A phase may use only what an earlier phase delivered.**
 
 - **Scope:** none. Requires an I²S microphone and a real wake-word model; no
   working wake-word model exists in any of the three repositories.
+- **Deliverables:** none.
 - **Exit criteria:** none set. Parked by `[user]`.
+- **Dependencies:** none; a future decision to unpark it, plus a working
+  wake-word model, which does not exist today.
 
 ---
 
@@ -498,7 +510,7 @@ a silent adoption.
 | OD-1 | `AppState::WIFI_CONNECTED`, `OTA_UPDATING` and `ERROR` are declared but no code path enters them. Remove them, or wire them? | FR-5.7 | Either change the enum or add the transitions and their requirements |
 | OD-2 | The state holder's header says the state is published on the status topic; nothing publishes it. Publish it, or correct the claim? | §5, §6.5 | Proposal: add a `state` field to the status document |
 | OD-3 | `ErrorHandler` counters are never exposed, though the header claims diagnosability from the status topic. Expose them, or correct the claim? | §16 | Proposal: add per-category counts to the status document |
-| OD-4 | `wifi_clear` writes empty strings, so `hasCredentials()` stays true and the next boot attempts association with an empty SSID. | FR-8.5 | Code fix required; the MQTT equivalent already erases keys |
+| OD-4 | `wifi_clear` writes empty strings, so `hasCredentials()` stays true and the next boot attempts association with an empty SSID. | FR-8.5, FR-8.9, NFR-15.6 | Code fix required; the MQTT equivalent already erases keys |
 | OD-5 | `Wifi_cfg.hpp`'s `ssid[32]` cannot hold a 32-character SSID. | FR-7.7 | Code fix required; follow the `MAX_LEN + 1` rule |
 | OD-6 | Which MQTT topic schema is canonical? | FR-9.1–FR-9.6 | Code + `architecture.rst` + Smart_Server agree; ROADMAP and `deployment.rst` are stale |
 | OD-7 | When does Home Assistant MQTT discovery return, and for which entities? | §3.5 | Firmware deliberately does not publish it today; Phase 4 owns it |
@@ -594,7 +606,7 @@ reboot always starts from `INIT` (FR-5.8).
 | ID | Pri | Requirement | Prov / status | Tier |
 |---|---|---|---|---|
 | FR-5.1 | Must | On boot with WiFi credentials present and `connect()` succeeding, the DUT shall set its state to `WIFI_CONNECTING` before association completes. | `[code]` approved | target |
-| FR-5.2 | Must | On acquiring an IPv4 address, the DUT shall set its state to `MQTT_CONNECTING` and start the MQTT client. | `[code]` approved | target |
+| FR-5.2 | Must | On acquiring an IPv4 address, the DUT shall set its state to `MQTT_CONNECTING`. | `[code]` approved | target |
 | FR-5.3 | Must | On an MQTT `CONNECTED` event, the DUT shall set its state to `RUNNING`. | `[code]` approved | target |
 | FR-5.4 | Must | On an MQTT `DISCONNECTED` event while the state is `RUNNING`, the DUT shall set its state to `MQTT_CONNECTING`. | `[code]` approved | target |
 | FR-5.5 | Must | On losing the WiFi link while the state is `RUNNING`, the DUT shall set its state to `WIFI_CONNECTING`. | `[code]` approved | target |
@@ -604,6 +616,7 @@ reboot always starts from `INIT` (FR-5.8).
 | FR-5.9 | Must | The DUT shall remain in `INIT` with no `WIFI_CONNECTING` transition when no WiFi credentials are stored. | `[code]` approved | target |
 | FR-5.10 | Must | The DUT shall not restart in response to a WiFi or MQTT disconnect. | `[code]` approved | bench |
 | FR-5.11 | Should | The DUT shall reach `WIFI_CONNECTING` within 1 s of a WiFi disconnect being observed. | `[derived]` approved | bench |
+| FR-5.12 | Must | On acquiring an IPv4 address, the DUT shall start the MQTT client. | `[code]` approved | target |
 
 ### 5.5 Verification contracts
 
@@ -620,6 +633,7 @@ reboot always starts from `INIT` (FR-5.8).
 | FR-5.9 | Erase WiFi credentials; reset. | No `WIFI_CONNECTING` transition; console prompt present. | Association attempt with an empty SSID | target |
 | FR-5.10 | Hold the AP down for 60 s and the broker down for 60 s. | Uptime increases monotonically; reset reason on recovery is not `software restart` or `panic`. | A reboot caused by either outage | bench |
 | FR-5.11 | Break the AP while `RUNNING`; timestamp the break. | A `RUNNING -> WIFI_CONNECTING` log line within 1 s (±0.2 s). | Transition later than 1.2 s; no transition | bench |
+| FR-5.12 | DUT connects to the AP. | An MQTT client is started within 1 s of the IP log line | An MQTT connection attempt before an IP is held | target |
 
 ### 5.6 Failure modes and safe states
 
@@ -690,9 +704,9 @@ commands. It consumes the MQTT interface (§9) and drives it.
 | FR-6.9 | Must | On `{"command":"get_status"}` the DUT shall re-publish the status document to the retained status topic. | `[code]` approved | target |
 | FR-6.10 | Must | On `{"command":"reboot"}` the DUT shall publish the acknowledgement before initiating the restart. | `[code]` approved | bench |
 | FR-6.11 | Must | On `{"command":"reboot"}` the DUT shall restart within 1 s of publishing the acknowledgement. | `[code]` approved | bench |
-| FR-6.12 | Must | On `{"command":"ota"}`, when the body carries a non-empty `url` or a stored `ota_url` exists, the DUT shall request an update and acknowledge it. | `[code]` approved | target |
-| FR-6.13 | Must | On `{"command":"ota"}` with no URL in the body and none stored, the DUT shall acknowledge with `status` = `error` and request no update. | `[code]` approved | target |
-| FR-6.14 | Must | On an unrecognised command verb the DUT shall acknowledge with `status` = `error` and take no other action. | `[code]` approved | target |
+| FR-6.12 | Must | On `{"command":"ota"}`, when the body carries a non-empty `url` or a stored `ota_url` exists, the DUT shall request an update for that URL. | `[code]` approved | target |
+| FR-6.13 | Must | On `{"command":"ota"}` with no URL in the body and none stored, the DUT shall acknowledge with `status` = `error`. | `[code]` approved | target |
+| FR-6.14 | Must | On an unrecognised command verb the DUT shall acknowledge with `status` = `error`. | `[code]` approved | target |
 | FR-6.15 | Must | On a body that is not valid JSON, or that has no string `command` field, the DUT shall publish no response. | `[code]` approved | target |
 | FR-6.16 | Must | While MQTT is disconnected the DUT shall publish no sensor reading. | `[code]` approved | bench |
 | FR-6.17 | Must | Every acknowledgement shall be a JSON object carrying `command`, `status` and `device_id`. | `[code]` approved | host |
@@ -771,8 +785,8 @@ Compact contracts:
 | FR-6.8 | Subscribe to `.../status` for 320 s. | A second status publish at ≈300 s | More than one extra publish in the window; none at all | bench |
 | FR-6.9 | DUT in RUNNING; publish `{"command":"get_status"}`; subscribe to the status topic. | A fresh retained status document (all nine keys of FR-6.6) is published within 5 s; the acknowledgement is covered by FR-6.17 | No re-publish; a status document published only on the response topic | target |
 | FR-6.12 | Store no `ota_url`; publish `{"command":"ota","url":"https://…/fw.bin"}`. | Ack `status` = `ok`; OTA transfers | Ack before the URL is validated; transfer of the stored URL | target |
-| FR-6.13 | Store no `ota_url`; publish `{"command":"ota"}`. | Ack `status` = `error`; no transfer begins | Any transfer; ack `ok` | target |
-| FR-6.14 | Publish `{"command":"fly"}`. | Ack `{"command":"fly","status":"error",...}`; no other action | A restart; an OTA download | target |
+| FR-6.13 | Store no `ota_url`; publish `{"command":"ota"}`. | Ack `status` = `error` | Any transfer; ack `ok` | target |
+| FR-6.14 | Publish `{"command":"fly"}`. | Ack `{"command":"fly","status":"error",...}` | A state change; an OTA download; a restart | target |
 | FR-6.16 | Stop the broker for 60 s; restart; capture the response topic and sensor topics. | After recovery, new readings only; no burst of buffered readings | More than one reading per channel within 1 s of recovery | bench |
 | FR-6.17 | Capture any acknowledgement. | JSON with exactly `command`, `status`, `device_id` | Unescaped verb; missing `device_id`; malformed JSON | host |
 | FR-6.18 | Timestamp 10 consecutive telemetry cycles. | Mean 30 s, each within ±1 s | A cycle <29 s or >31 s | bench |
@@ -814,13 +828,14 @@ operator provisioned. The ESP-IDF WiFi driver underneath is L0.
 
 | ID | Pri | Requirement | Prov / status | Tier |
 |---|---|---|---|---|
-| FR-7.1 | Must | On `connect()` the DUT shall configure the station with the SSID and passphrase read from NVS and start the WiFi driver. | `[code]` approved | target |
+| FR-7.1 | Must | On `connect()` the DUT shall configure the station with the SSID and passphrase read from NVS. | `[code]` approved | target |
 | FR-7.2 | Must | The DUT shall refuse to associate with an access point whose authentication mode is below WPA/WPA2-PSK. | `[code]` approved | bench |
 | FR-7.3 | Must | On a station disconnect while the attempt count is below 10, the DUT shall call `esp_wifi_connect()` again no sooner than 5 s after the previous attempt. | `[code]` detected-in-code | bench |
 | FR-7.4 | Must | On reaching 10 failed attempts, the DUT shall stop re-attempting association until the next reset. | `[code]` detected-in-code | bench |
 | FR-7.5 | Must | On acquiring an IPv4 address, the DUT shall reset the reconnect attempt count to zero. | `[code]` detected-in-code | bench |
 | FR-7.6 | Must | The DUT shall report its acquired IPv4 address as a dotted-quad string in the status document's `ip` field. | `[code]` approved | target |
 | FR-7.7 | Must | The DUT shall accept and use an SSID of up to and including 32 characters. | `[derived]` approved — **currently unmeetable** (OD-5) | target |
+| FR-7.9 | Must | On `connect()` the DUT shall start the WiFi driver with the configured station settings. | `[code]` approved | target |
 
 ### 7.3 Verification contracts
 
@@ -852,11 +867,12 @@ verification:
 
 | ID | Precondition · stimulus | Expected observation | Must NOT happen | Tier |
 |---|---|---|---|---|
-| FR-7.1 | Credentials in NVS; call `connect()` (or reset). | Station starts and association is attempted; `WiFi connection initiated` logged. | Association with an SSID other than the stored one | target |
+| FR-7.1 | Credentials in NVS; read the station configuration after boot. | The stored SSID and passphrase are the ones applied | Association with an SSID other than the stored one | target |
 | FR-7.2 | Configure an open (no-security) AP with the provisioned SSID. | Association fails; the DUT keeps retrying per FR-7.3 | Successful association to an open AP | bench |
 | FR-7.5 | DUT associates successfully, then drops the AP once and reconnects. | Attempt counter restarts from 1 after the successful association | The counter continuing from its pre-connect value | bench |
 | FR-7.6 | DUT has an IPv4 address; read the retained status. | `ip` is the dotted-quad address the AP leased | A stale address; an empty field; a MAC address | target |
 | FR-7.7 | Provision a 32-character SSID and reset. | Association succeeds and the status `ip` is populated | Truncation; failure to associate; a 31-character SSID stored | target |
+| FR-7.9 | Credentials in NVS; reset. | The driver starts and the station begins association | A configured station that never starts | target |
 
 ### 7.4 Failure modes
 
@@ -883,14 +899,15 @@ itself is §12.
 | FR-8.2 | Must | Stored WiFi credentials shall survive a reset without re-entry. | `[code]` approved | target |
 | FR-8.3 | Must | `wifi_status` shall report whether WiFi credentials are configured. | `[code]` approved | target |
 | FR-8.4 | Must | The firmware image shall contain no built-in SSID or passphrase. | `[user]` approved | host |
-| FR-8.5 | Must | After `wifi_clear`, `hasCredentials()` shall return false and the next boot shall not attempt association. | `[derived]` approved — **currently unmet** (OD-4) | target |
+| FR-8.5 | Must | After `wifi_clear`, `hasCredentials()` shall return false. | `[derived]` approved — **currently unmet** (OD-4) | target |
 | FR-8.6 | Must | A DUT with no stored credentials shall present a usable console REPL and shall not retry association. | `[code]` approved | target |
+| FR-8.9 | Must | The boot following a successful `wifi_clear` shall not attempt association. | `[derived]` approved — **currently unmet** (OD-4) | target |
 | FR-8.8 | Must | `wifi_set`, `wifi_ssid` and `wifi_password` shall each return exit status 0 on success and 1 on failure. | `[code]` approved | target |
 
 ### 8.3 Verification contracts
 
 ```yaml
-id: FR-8.5
+id: FR-8.5 / FR-8.9
 verification:
   preconditions:
     - The DUT has previously stored a valid SSID and passphrase.
@@ -974,10 +991,11 @@ path).
 | FR-9.11 | Must | On every successful connect the DUT shall reset the backoff to its initial 2 s value. | `[code]` approved | bench |
 | FR-9.12 | Must | On losing WiFi the DUT shall disconnect the MQTT client so the broker publishes the Last Will without waiting for the keepalive. | `[code]` approved | bench |
 | FR-9.13 | Must | After the broker returns, the DUT shall publish a valid telemetry reading within 30 s of broker availability. | `[derived]` approved | bench |
-| FR-9.14 | Must | A publish whose payload exceeds the 2048-byte outbox shall not be transmitted and shall be logged at warning level. | `[code]` approved | target |
+| FR-9.14 | Must | A publish whose payload exceeds the 2048-byte outbox shall not be transmitted. | `[code]` approved | target |
+| FR-9.18 | Must | A rejected oversize publish shall be logged at warning level naming the topic. | `[code]` approved | target |
 | FR-9.15 | Must | A command published while the DUT is rebooting shall be delivered to the DUT after it reconnects. | `[code]` derived from persistent session | bench |
 | FR-9.16 | Must | The DUT shall not queue sensor readings for delivery after a disconnect. | `[code]` approved | bench |
-| FR-9.17 | Must | The DUT shall not use the esp-mqtt client's built-in automatic reconnect. | `[code]` detected-in-code | bench |
+| FR-9.17 | Must | Retries of a lost MQTT session shall follow the cadence of FR-9.10 and shall not be issued at a fixed interval. | `[code]` detected-in-code | bench |
 
 ### 9.4 Verification contracts
 
@@ -1075,7 +1093,8 @@ verification:
 | FR-9.8 | Inspect the CONNECT packet's clean-session flag. | Clean session = 0 | Clean session = 1 | bench |
 | FR-9.9 | Inspect CONNECT with and without an MQTT username provisioned. | Client id = device id; credentials present only when configured | Empty username sent when unconfigured | bench |
 | FR-9.12 | Establish a session; disable the AP. | The broker sees a DISCONNECT (or the socket close) within 2 s | The broker waiting out 45 s before the Last Will | bench |
-| FR-9.14 | Cause a publish larger than the outbox (bench helper). | A warning log line; nothing transmitted | Partial payload transmitted | target |
+| FR-9.14 | Cause a publish larger than the outbox (bench helper). | Nothing transmitted | Partial payload transmitted; a truncated message on the topic | target |
+| FR-9.18 | Cause an oversize publish. | One warning log line naming the topic | A silent drop; an error-level line for a rejected oversize payload | target |
 | FR-9.15 | Publish `get_status` while the DUT is rebooting; wait for reconnect. | The command executes after reconnect and an acknowledgement is published | The command lost | bench |
 | FR-9.16 | Disconnect the broker for 90 s; reconnect. | At most one reading per channel immediately after recovery (the normal cadence) | A burst of buffered readings | bench |
 | FR-9.17 | Inspect reconnect timing with the broker down. | Cadence matches FR-9.10, not a fixed 10 s | Fixed 10 s retries | bench |
@@ -1187,12 +1206,13 @@ pushed. Transport is `esp_https_ota` (L0).
 | FR-11.6 | Must | An image built with the OTA-test overlay shall accept a plain `http://` OTA URL. | `[code]` approved | bench |
 | FR-11.7 | Must | The DUT shall publish one progress message on the response topic each time the integer percentage of bytes read changes. | `[code]` approved | target |
 | FR-11.8 | Must | On a successful transfer the DUT shall finish the update, publish progress 100, and restart within 2 s. | `[code]` approved | bench |
-| FR-11.9 | Must | On a failed transfer the DUT shall abort the update, report an OTA error, and continue running the current image. | `[code]` approved | bench |
+| FR-11.9 | Must | On a failed transfer the DUT shall abort the update and continue running the current image. | `[code]` approved | bench |
 | FR-11.10 | Must | An update shall be written to the OTA slot that is not running. | `[code]` approved | bench |
 | FR-11.11 | Must | The DUT shall not apply a total-transfer timeout to an OTA download. | `[code]` approved | bench |
 | FR-11.12 | Must | When the `ota` command carries no `url`, the DUT shall use the stored `ota_url`. | `[code]` approved | target |
 | NFR-11.13 | Must | An image that transfers successfully but fails at runtime shall **not** be rolled back automatically in the current build. | `[code]` approved negative requirement | bench |
 | NFR-11.14 | Should | An OTA download shall not add more than 200 ms of latency to a `get_status` command response. | `[derived]` proposed | bench |
+| FR-11.15 | Must | On a failed transfer the DUT shall report an OTA error through the error handler. | `[code]` approved | bench |
 
 ### 11.3 Verification contracts
 
@@ -1253,7 +1273,7 @@ verification:
 ```
 
 ```yaml
-id: FR-11.9
+id: FR-11.9 / FR-11.15
 verification:
   preconditions:
     - The DUT is in RUNNING on a known firmware version.
@@ -1295,6 +1315,7 @@ Compact contracts:
 | FR-11.12 | Store `ota_url`; publish `{"command":"ota"}` with no url. | The stored URL is used | No transfer; a different URL | target |
 | NFR-11.13 | Flash an image that panics at boot over OTA. | The DUT remains on the failing image across ≥3 resets | An automatic rollback to the previous slot | bench |
 | NFR-11.14 | Measure `get_status` round-trip with and without a concurrent download. | Added latency ≤200 ms | A response delayed beyond 200 ms | bench |
+| FR-11.15 | Serve a corrupt/truncated image; watch the serial log and the category counters. | An OTA-category error is reported | A silent failure; an error attributed to another category | bench |
 
 ### 11.4 Failure modes
 
@@ -1406,10 +1427,10 @@ platform test of its own.
 | NFR-13.2 | Must | On `ESP_ERR_NVS_NO_FREE_PAGES` or `ESP_ERR_NVS_NEW_VERSION_FOUND` during NVS init, the DUT shall erase the NVS partition and initialise again. | `[code]` approved | target |
 | NFR-13.3 | Must | The DUT shall run the task watchdog with a 30 s timeout and shall subscribe and feed it from the MQTT and OTA tasks. | `[code]` approved | target |
 | NFR-13.4 | Must | The main task stack shall be 8192 bytes. | `[code]` approved | host |
-| NFR-13.5 | Must | Response bodies and the status document shall be produced with a JSON encoder or a format string whose output parses as JSON, and a command verb echoed into a response shall be JSON-escaped. | `[code]` approved | host |
-| NFR-13.6 | Must | Service tasks shall be pinned explicitly: WiFi 3072 B / priority 5 / core 0; MQTT 4096 B / priority 5 / core 0; OTA 8192 B / priority 6 / core 0. | `[code]` approved | host |
+| NFR-13.5 | Must | Every response body and status document shall parse as JSON, and a command verb echoed into a response shall round-trip unchanged. | `[code]` approved | host |
+| NFR-13.6 | Must | The DUT shall create its service tasks with the stacks, priorities and cores recorded in Appendix F. | `[code]` approved constraint | review |
 | NFR-13.7 | Must | The DUT shall reach the console prompt on every boot, including a boot with no WiFi or MQTT configuration and a boot after NVS erasure. | `[code]` approved | target |
-| NFR-13.8 | Must | Flash queue and event-queue allocations shall not be placed in PSRAM. | `[code]` approved | host |
+| NFR-13.8 | Must | The DUT shall allocate FreeRTOS queues and task stacks from internal SRAM, not from PSRAM. | `[code]` approved constraint | review |
 | NFR-13.9 | May | Additional tasks may be pinned to core 1 once there is work for them; acceptance is a human review confirming each core-1 task is named and documented in §2.1. | `[code]` approved | review |
 
 ### 13.3 Verification contracts
@@ -1421,9 +1442,9 @@ platform test of its own.
 | NFR-13.3 | Block the MQTT task (bench-injected) for 35 s. | The TWDT fires and the DUT restarts with reset reason `task watchdog` | An infinite hang with no reset | target |
 | NFR-13.4 | Inspect the generated config. | `CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192` | Any other value | host |
 | NFR-13.5 | Send a command whose verb contains a JSON metacharacter. | The acknowledgement parses as JSON and round-trips the verb | Malformed JSON; an unescaped quote | host |
-| NFR-13.6 | Read the task creation calls or the boot logs. | Stacks, priorities and cores as stated | An unpinned `xTaskCreate` for a service | host |
+| NFR-13.6 | Review the task tables in §2.1 and Appendix F against the task creation calls. | Stacks, priorities and cores as recorded | An unpinned service task; an undocumented mismatch | review |
 | NFR-13.7 | Erase NVS; reset; capture boot. | `esp32>` prompt appears; `help` responds | A hang before the prompt | target |
-| NFR-13.8 | Inspect task and queue allocation capabilities. | Internal SRAM only | A queue or task stack allocated from PSRAM | host |
+| NFR-13.8 | Review every queue and task-stack allocation capability against the internal-SRAM rule. | Internal SRAM only | A queue or task stack allocated from PSRAM | review |
 | NFR-13.9 | Review §2.1 against the task list. | Each core-1 task is named with its responsibility | An undocumented core-1 task | review |
 
 ### 13.4 Failure and recovery
@@ -1503,9 +1524,10 @@ is set over the serial console.
 |---|---|---|---|---|
 | NFR-15.1 | Must | Every runtime-configurable value shall be stored in NVS; none shall be compiled into the image. | `[user]` approved | host |
 | NFR-15.2 | Must | A stored configuration change shall take effect only after a reset, except `ota_url`, which shall be read at the time an `ota` command without a URL is handled. | `[code]` approved | target |
-| NFR-15.3 | Must | `mqtt_clear` shall restore every `mqtt_config` field to its documented default, including re-derivation of the device id, and `wifi_clear` shall restore the WiFi fields to "not provisioned". | `[code]` approved — WiFi half unmet (OD-4) | target |
+| NFR-15.3 | Must | `mqtt_clear` shall restore every `mqtt_config` field to its documented default, including re-derivation of the device id. | `[code]` approved | target |
 | NFR-15.4 | Must | A value that exceeds its field's valid range or fails its validation rule shall be rejected and the previously stored value retained. | `[code]` approved | host |
 | NFR-15.5 | Must | A sensitive field (WiFi passphrase, MQTT password) shall never be displayed by any console command, written to the serial log, or published on any MQTT topic. | `[code]` approved | target |
+| NFR-15.6 | Must | `wifi_clear` shall restore the WiFi fields to the not-provisioned state. | `[code]` approved — **currently unmet** (OD-4) | target |
 
 ### 15.3 Verification contracts
 
@@ -1513,9 +1535,10 @@ is set over the serial console.
 |---|---|---|---|---|
 | NFR-15.1 | Build the image; inspect it and a flash dump. | No credential or per-device value present | A compiled-in SSID/password/device id | host |
 | NFR-15.2 | Change `mqtt_set`; before rebooting, read the retained status. | The old broker is still in use until reset | A live reconnect to the newly stored broker | target |
-| NFR-15.3 | Store full config; run both clears; reset. | Neither subsystem is provisioned; no connection attempts; the device id is re-derived | Empty-string keys left behind; an attempted association | target |
+| NFR-15.3 | Store full MQTT config; run `mqtt_clear`; reset. | No MQTT connection attempted; the device id is re-derived; every field is at its default | Empty-string keys left behind so `hasConfig()` stays true | target |
 | NFR-15.4 | Store a 25-character device id; then a valid id. | Rejected; the previously stored id still in use | A truncated or sanitised value stored | host |
 | NFR-15.5 | Run every console command that prints configuration, set a distinctive secret, and complete a telemetry cycle. | Secrets appear only as presence markers; the literal string appears in no command output, log line or MQTT payload | The literal passphrase or password anywhere | target |
+| NFR-15.6 | Store WiFi credentials; run `wifi_clear`; inspect the namespace. | The `ssid` and `password` keys are absent; `hasCredentials()` is false | The keys present with empty values | target |
 
 ## 16. Error Handling and Diagnostics
 
@@ -1643,7 +1666,8 @@ Requirements owned by this chapter:
 | ID | Pri | Requirement | Prov / status | Tier |
 |---|---|---|---|---|
 | NFR-18.3 | Must | The plain-HTTP OTA allowance shall be enabled only by building with the OTA-test overlay, never in `sdkconfig.defaults`. | `[user]` approved | host |
-| NFR-18.4 | Must | The firmware shall implement no Matter, Thread, Google or other cloud protocol, and shall open no inbound network listener. | `[user]` approved | bench |
+| NFR-18.4 | Must | The firmware shall implement no Matter, Thread, Google or other cloud protocol. | `[user]` approved | bench |
+| NFR-18.10 | Must | The firmware shall open no inbound network listener. | `[derived]` approved | bench |
 | NFR-18.6 | Should | Off-bench operation shall use an authenticating MQTT broker, so that an anonymous LAN peer cannot publish commands. | `[user]` approved | bench |
 | NFR-18.9 | Must | No acceptance criterion in this FSD shall accept "encrypted or obfuscated" as satisfying a protection. | `[derived]` approved | review |
 
@@ -1652,7 +1676,8 @@ Requirements owned by this chapter:
 | ID | Precondition · stimulus | Expected observation | Must NOT happen | Tier |
 |---|---|---|---|---|
 | NFR-18.3 | Grep `sdkconfig.defaults` and build with and without the overlay. | The symbol appears only in the overlay; the production image refuses http | The symbol in `sdkconfig.defaults`; http accepted by a production build | host |
-| NFR-18.4 | Port-scan the DUT from the LAN; inspect the protocol set. | No listening TCP/UDP port; no Matter/Thread/Google symbols in the image | Any inbound listener | bench |
+| NFR-18.4 | Inspect the protocol set in the image and on the wire. | No Matter/Thread/Google symbols or traffic | Any such protocol implemented | bench |
+| NFR-18.10 | Port-scan the DUT from the LAN. | No listening TCP or UDP port | Any inbound listener | bench |
 | NFR-18.6 | Point the DUT at an authenticating broker. | The session is accepted with the configured credentials | A fallback to anonymous | bench |
 | NFR-18.9 | Review every acceptance criterion in this FSD. | No criterion of the form "encrypted or obfuscated"; accepted risks are listed in §18.2 | A criterion that cannot fail | review |
 
@@ -1809,7 +1834,7 @@ Covered/GAP column.
 |---|---|
 | Specification | No boot deadline (OD-17); no rollback threshold (OD-11); no actuator/sensor requirements (Phases 3 and 5) |
 | Verification | Every requirement: no test exists, and no tier is available |
-| Implementation | FR-7.7 (32-char SSID), FR-8.5 (`wifi_clear`), NFR-15.3 (WiFi reset), FR-5.7 (unreachable states — pending OD-1) |
+| Implementation | FR-7.7 (32-char SSID), FR-8.5 / FR-8.9 / NFR-15.6 (`wifi_clear`), FR-5.7 (unreachable states — pending OD-1) |
 | Evidence | No hardware has been run; only build-level smoke evidence exists (§1.6) |
 | `pending` requirements | None — no requirement is marked `pending` in this document |
 | `philosophical` requirements | FR-6.20 and NFR-13.9 (human-judgement acceptance) |
