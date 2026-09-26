@@ -18,6 +18,43 @@ name: CI
 #      host and fails with "idf.py: command not found".
 #
 # If a step here cannot fail, it should not be here.
+#
+# Release verification -- added for the harness (Phase 1, step 6). This job has
+# never run, and it is deliberately unrunnable until the hardware exists:
+#
+#   1. There is no self-hosted runner and no testbench on the LAN, and nothing
+#      in this project has ever been flashed to a board. The `release-verify`
+#      job is the job that flashes a *released* image to a bench slot and runs
+#      the project's journey tests on it; until that runner and bench exist it
+#      is gated on the repository variable `TESTBENCH_READY` and is skipped. A
+#      skipped job cannot fail, so it cannot turn a tag push red, and it cannot
+#      stop `release` from publishing. That is deliberate -- a tag push must
+#      keep publishing today.
+#   2. The gap is real and is not swallowed. While the job is skipped, "release
+#      published" means *it compiles and the image fits its OTA slot*. It does
+#      NOT mean the bytes were ever run on hardware, and the harness rule that
+#      a release counts as shipped only when the journey is green on the exact
+#      bytes users download is NOT yet satisfied. The switch is a repository
+#      variable, and it is named in the job so a reader of any tag run can see
+#      what is missing without opening this file.
+#   3. To make it real: register the per-repo runner inside the devcontainer
+#      with labels [self-hosted, testbench], write the journey tests the job
+#      calls (tests/bench, with ids and impl: paths declared in
+#      testing/test-plan.yaml), power the bench, and only then set repository
+#      variable TESTBENCH_READY=true. The order matters and is spelled out on
+#      the job itself.
+#
+# Gate role -- why there is no separate "gate" workflow here: the build job
+# below runs on every push and pull request and fails on anything that does not
+# compile or whose image the smoke checks reject, so everything a hosted runner
+# can decide is already decided before a merge. Static analysis is in the same
+# workflow, deliberately non-blocking (see its `continue-on-error`). A second
+# workflow would add a tick, not a check: the only hosted-runnable tests this
+# project has are the ones already in this job, and a gate must be green from
+# its first run -- a new one would either duplicate this file or be red
+# immediately, which is exactly how a gate teaches people to ignore a red tick.
+# The bench tier is unreachable from a hosted runner; `release-verify` is where
+# it is gated, on the only trigger where it can be paid for.
 
 on:
   push:
@@ -175,11 +212,140 @@ jobs:
         path: tests/cppcheck_report.xml
         if-no-files-found: ignore
 
+  release-verify:
+    name: Verify the released image on the bench (journey)
+    # Tag push only. A journey run on a branch proves something about a commit
+    # nobody downloads; the claim this job supports -- the shipped bytes work
+    # -- is only meaningful for the ref that is being released.
+    #
+    # `TESTBENCH_READY` is the guard, and a job-level `if` is the guard
+    # mechanism so the job is skipped *before* it is queued: no runner is
+    # requested, so there is nothing to wait on and nothing that can fail.
+    # `continue-on-error` was rejected on purpose -- it would let the job run,
+    # fail, and still colour the run green, which is the "if a step here cannot
+    # fail, it should not be here" mistake this file opens with, made worse by
+    # a green tick that claims a journey ran when none did. A skipped job reads
+    # as skipped in the UI and cannot be mistaken for a pass.
+    #
+    # Set the variable only AFTER the runner is registered and the bench is
+    # powered. A runner that does not exist leaves this job queued (and the
+    # release behind it waiting) for as long as GitHub keeps queued jobs --
+    # which looks like a hang, not like the honest skip it replaces.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && vars.TESTBENCH_READY == 'true'
+    needs: [ build ]
+    # The runner lives inside this project's devcontainer -- one project, one
+    # container -- so there is nothing to install here: it already holds the
+    # bench pytest tier, TestbenchDriver, discovery and slot config. Hence no
+    # `container:` key; the runner is already inside one.
+    runs-on: [ self-hosted, testbench ]
+    # A bench run drives physical hardware, so bound it: a hung flash or a
+    # test waiting on an operator must fail the job rather than hold the bench.
+    timeout-minutes: 45
+
+    steps:
+    - name: Checkout
+      # The journey tests are project code, so they come from the tagged tree.
+      # No submodules: the bench tooling is in the runner's image, not here.
+      uses: actions/checkout@v4
+
+    - name: Download the released artifact
+      # The bytes from THIS run. The `release` job below tars these same files,
+      # so the journey runs on the bytes users download without a rebuild --
+      # that rebuild is the weak link this whole job exists to remove.
+      # Nothing is ever built on this runner: a locally built binary is a
+      # different binary, and a green journey on it would prove nothing.
+      uses: actions/download-artifact@v4
+      with:
+        name: firmware
+        path: firmware
+
+    - name: Precondition -- a bench answers
+      # An unreachable bench is an unmet precondition, not a failed journey.
+      # It is reported as "not done" with the reason, and it publishes nothing
+      # either: a release whose bytes were never flashed must not look
+      # verified. Power the bench and re-run the job -- never retry blind.
+      run: |
+        set -euo pipefail
+
+        url="${{ vars.TESTBENCH_URL }}"
+        if [ -z "$url" ]; then
+          # Discovery belongs to the devcontainer. It refuses to guess when
+          # more than one bench answers, which is why the bench is named.
+          url="$(discover-testbench --url --name smart-home || true)"
+        fi
+
+        if [ -z "$url" ] || ! curl -sf --max-time 10 "$url/api/info" > /dev/null; then
+          echo "::error::not done -- no bench answered (${url:-not discovered}). Power the bench, or set vars.TESTBENCH_URL, then re-run. Nothing was flashed."
+          {
+            echo "### Release verify: not done"
+            echo ""
+            echo "No bench answered, so the released image was never flashed and"
+            echo "the journey did not run. This is an unmet precondition, not a"
+            echo "failed test -- power the bench and re-run the job."
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+        fi
+        echo "TESTBENCH_URL=$url" >> "$GITHUB_ENV"
+
+        # Never hard-code a slot. Labels move with the USB topology, and every
+        # native-USB ESP32 enumerates under the same vid:pid, so select on the
+        # chip the bench itself detected -- and skip slots an OpenOCD session
+        # holds, which still read idle while the port is taken.
+        slot="$(curl -sf "$url/api/devices" | python3 -c '
+        import json, sys
+        for s in json.load(sys.stdin)["slots"]:
+            if s.get("detected_chip") == "esp32s3" and not s.get("debugging"):
+                print(s["label"]); break
+        ')"
+        if [ -z "$slot" ]; then
+          echo "::error::not done -- no free esp32s3 slot on the bench. Nothing was flashed."
+          exit 1
+        fi
+        echo "SLOT=$slot" >> "$GITHUB_ENV"
+        echo "bench $url, slot $slot"
+
+    - name: Flash the released image to the bench
+      # Offsets come from the artifact's own flash_args, never from a list
+      # written here: enabling OTA moved the app to 0x20000 and added
+      # ota_data_initial.bin at 0xf000, and a remembered offset writes into the
+      # wrong partition and boots the previous firmware -- which looks exactly
+      # like a flash that worked. The explicit-offset form is the documented
+      # one for a CI artifact, which carries no build tree to flash from.
+      run: |
+        set -euo pipefail
+        cd firmware
+        args=(-F "slot=$SLOT" -F chip=esp32s3 -F baud=921600)
+        while read -r offset name; do
+          case "$offset" in
+            0x*) args+=(-F "bin@${offset}=@${name}") ;;
+          esac
+        done < flash_args
+        curl -fsS -X POST "$TESTBENCH_URL/api/flash" "${args[@]}"
+        echo "flashed $(grep -c '^0x' flash_args) image(s) from the released artifact"
+
+    - name: Run the journey
+      # The journey is the project's own suite, reached through the runner's
+      # devcontainer. Path and flag are the harness's declared interface; the
+      # test ids behind them live in testing/test-plan.yaml under impl:.
+      # The suite flushes nothing and builds nothing: the bytes under test are
+      # the ones the step above flashed, straight out of the artifact.
+      # A red journey here stops the release -- the `release` job needs this
+      # job and is skipped when it fails.
+      run: pytest tests/bench --journey -q
+
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [ build ]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # `release-verify` is in `needs` so that a red journey means no release.
+    # `always()` is here for a subtler reason: when a needed job is *skipped*
+    # -- which is what release-verify is today, with TESTBENCH_READY unset --
+    # GitHub propagates the skip and this job would be skipped too, so a tag
+    # push would publish nothing. always() escapes that propagation, and the
+    # explicit !failure()/!cancelled() put the gate back in its place: a failed
+    # build or a failed journey still stops the release, and a cancelled run
+    # does not publish.
+    needs: [ build, release-verify ]
+    if: always() && !failure() && !cancelled() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
 
     steps:
     - name: Download firmware
@@ -189,9 +355,24 @@ jobs:
         path: release/
 
     - name: Package firmware
+      # Archive the WHOLE downloaded artifact, not `./*.bin`.
+      #
+      # upload-artifact preserves the paths' least common ancestor, so the
+      # artifact root holds smart_home.bin and ota_data_initial.bin at the top
+      # level but bootloader/bootloader.bin and partition_table/partition-table.bin
+      # nested one deep. `./*.bin` does not recurse, so the old command shipped a
+      # tarball that omitted both -- while the flash_args inside it named them,
+      # which made the documented `esptool.py write_flash @flash_args` fail on
+      # every extracted release. Everything flash_args names must be in the
+      # bundle, and the nesting must be preserved so those relative paths resolve.
+      #
+      # Written outside release/ so the archive cannot try to include itself.
       run: |
         cd release
-        tar -czf "smart_home_firmware_${{ github.ref_name }}.tar.gz" ./*.bin ./flash_args
+        tar -czf "$RUNNER_TEMP/firmware.tar.gz" .
+        mv "$RUNNER_TEMP/firmware.tar.gz" "smart_home_firmware_${{ github.ref_name }}.tar.gz"
+        echo "packaged:"
+        tar -tzf "smart_home_firmware_${{ github.ref_name }}.tar.gz"
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
